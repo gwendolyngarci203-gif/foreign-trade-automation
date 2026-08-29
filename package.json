@@ -1,0 +1,14 @@
+{
+  "name": "foreign-trade-automation-toolkit",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "start": "node app/server.mjs",
+    "test": "node --check app/server.mjs && node --check app/pipeline-worker.mjs && node --check app/public/app.js && node app/tests/contact-collection-unit.mjs && node app/tests/managed-hscode-plan-unit.mjs && node app/tests/pipeline-worker-unit.mjs && node app/tests/reprocess-managed-history-unit.mjs && node app/tests/mobile-responsive-unit.mjs && node app/tests/public-smoke.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

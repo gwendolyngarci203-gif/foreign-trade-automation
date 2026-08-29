@@ -1,0 +1,68 @@
+:root {
+  --color-paper: oklch(98.5% 0.004 250);
+  --color-paper-2: oklch(96.8% 0.006 250);
+  --color-paper-3: oklch(94.5% 0.008 250);
+  --color-ink: oklch(24% 0.020 258);
+  --color-ink-2: oklch(34% 0.018 257);
+  --color-muted: oklch(50% 0.014 255);
+  --color-neutral: oklch(41% 0.014 255);
+  --color-rule: oklch(89% 0.010 250);
+  --color-rule-2: oklch(78% 0.014 250);
+  --color-accent: oklch(53% 0.165 242);
+  --color-accent-hover: oklch(45% 0.150 242);
+  --color-accent-soft: oklch(94% 0.028 242);
+  --color-accent-ink: oklch(98.5% 0.004 250);
+  --color-focus: oklch(61% 0.190 242);
+  --color-graphite: oklch(22% 0.016 260);
+  --color-graphite-2: oklch(28% 0.016 260);
+  --color-graphite-ink: oklch(94% 0.010 250);
+  --color-graphite-muted: oklch(72% 0.012 250);
+  --color-graphite-rule: oklch(34% 0.016 255);
+  --color-brand: oklch(78% 0.145 82);
+  --color-brand-ink: oklch(24% 0.020 258);
+  --color-success: oklch(49% 0.125 154);
+  --color-success-soft: oklch(94% 0.030 154);
+  --color-warning: oklch(48% 0.125 68);
+  --color-warning-soft: oklch(95% 0.035 82);
+  --color-danger: oklch(50% 0.170 28);
+  --color-danger-soft: oklch(94% 0.035 28);
+
+  --font-display: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-body: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-outlier: Consolas, "SFMono-Regular", monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.625rem;
+  --text-2xl: clamp(1.85rem, 2.8vw, 2.65rem);
+
+  --space-3xs: 0.25rem;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+  --space-2xl: 4.5rem;
+
+  --radius-input: 6px;
+  --radius-card: 10px;
+  --radius-pill: 999px;
+  --rule-hair: 1px;
+  --rule-fine: 2px;
+  --shadow-card: 0 1px 2px oklch(24% 0.020 258 / 0.05);
+  --shadow-dialog: 0 24px 64px oklch(20% 0.020 258 / 0.22);
+  --shadow-toast: 0 8px 22px oklch(24% 0.020 258 / 0.20);
+  --shadow-drawer: 12px 0 34px oklch(20% 0.020 258 / 0.20);
+  --color-scrim: oklch(20% 0.020 258 / 0.34);
+  --banner-height: 76px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+  --dur-long: 420ms;
+}

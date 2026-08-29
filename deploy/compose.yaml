@@ -1,0 +1,39 @@
+services:
+  prospect-ops:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: foreign-trade-automation
+    restart: unless-stopped
+    env_file:
+      - .env.runtime
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4173
+      SOURCE_PATH: /srv/examples/sample-source.json
+      CAMPAIGN_PATH: /srv/app/data/campaigns.json
+      VALIDATION_PATH: /srv/app/data/contact-validation.json
+      SUPPRESSION_PATH: /srv/app/data/suppressions.json
+      OPERATIONS_PATH: /srv/app/data/operations.json
+      PIPELINE_PATH: /srv/app/data/pipeline.json
+      OUTBOX_PATH: /srv/app/data/outbox.json
+      RUNTIME_STATE_PATH: /srv/app/data/runtime-state.json
+      LOCAL_BACKUP_DIR: /srv/app/data/backups
+      EMAIL_SENDING_ENABLED: "false"
+      EMAIL_ALLOW_UNVERIFIED: "false"
+    ports:
+      - "4173:4173"
+    volumes:
+      - ./runtime-data:/srv/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

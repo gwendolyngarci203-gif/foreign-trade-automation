@@ -1,0 +1,93 @@
+{
+  "retrieval_date": "2026-01-01",
+  "supplier_query": "Example Supplier",
+  "supplier_summary": {
+    "amount_usd": 250000,
+    "trade_count": 24,
+    "last_trade_date": "2025-12-15"
+  },
+  "raw_buyer_count": 2,
+  "raw_buyer_amount_sum_usd": 250000,
+  "reconciliation_difference_usd": 0,
+  "all_buyers": [
+    {
+      "buyer": "Northwind Trading",
+      "country": "United States",
+      "amount_usd": 150000,
+      "share_pct": 60,
+      "last_trade_date": "2025-12-15",
+      "trade_count": 14
+    },
+    {
+      "buyer": "Contoso Retail",
+      "country": "Canada",
+      "amount_usd": 100000,
+      "share_pct": 40,
+      "last_trade_date": "2025-11-30",
+      "trade_count": 10
+    }
+  ],
+  "top20_company_and_contacts": [
+    {
+      "query_name": "Northwind Trading",
+      "match_confidence": "高",
+      "match_note": "Synthetic example record",
+      "trade": {
+        "country": "United States",
+        "amount_usd": 150000
+      },
+      "meta": {
+        "matched_company": "Northwind Trading",
+        "website": "https://example.com/northwind",
+        "company_phone": "+1 555 0101",
+        "address": "Example City, United States",
+        "contact_count": 1
+      },
+      "contacts": [
+        {
+          "name": "Alex Buyer",
+          "title": "Purchasing Manager",
+          "email": "alex@example.com",
+          "phone": "+1 555 0102",
+          "linkedin": "https://example.com/alex",
+          "source": "synthetic_sample"
+        }
+      ],
+      "accessible_contact_rows": 1
+    },
+    {
+      "query_name": "Contoso Retail",
+      "match_confidence": "中",
+      "match_note": "Synthetic example record",
+      "trade": {
+        "country": "Canada",
+        "amount_usd": 100000
+      },
+      "meta": {
+        "matched_company": "Contoso Retail",
+        "website": "https://example.com/contoso",
+        "company_phone": "+1 555 0103",
+        "address": "Example City, Canada",
+        "contact_count": 1
+      },
+      "contacts": [
+        {
+          "name": "Taylor Sourcing",
+          "title": "Sourcing Lead",
+          "email": "taylor@example.net",
+          "phone": "+1 555 0104",
+          "linkedin": "https://example.com/taylor",
+          "source": "synthetic_sample"
+        }
+      ],
+      "accessible_contact_rows": 1
+    }
+  ],
+  "contact_summary": {
+    "raw_linked_rows": 2,
+    "unique_contacts": 2,
+    "unique_emails": 2,
+    "unique_phones": 2,
+    "duplicate_links": 0
+  }
+}

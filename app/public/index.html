@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <title>Foreign Trade Automation Toolkit</title>
+    <link rel="stylesheet" href="/tokens.css" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" integrity="sha384-uTYyvsSSUZeaPhb5RbKlQa0zY/WpX/QHfvg2mczXyBQOpkWPEDy9lczyp+w7SKXu" crossorigin="anonymous"></script>
+    <script defer src="/app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="主导航" aria-hidden="false">
+        <div class="brand-block">
+          <div class="brand-mark">FT</div>
+          <div>
+            <div class="brand-name">Open Outreach</div>
+            <div class="brand-subtitle">Automation Toolkit</div>
+          </div>
+        </div>
+
+        <nav class="main-nav" aria-label="主导航">
+          <button class="nav-item active" data-view="overview" type="button">
+            <i data-lucide="layout-dashboard"></i><span>数据总览</span>
+          </button>
+          <button class="nav-item" data-view="foundation" type="button">
+            <i data-lucide="database"></i><span>业务底盘</span>
+          </button>
+          <button class="nav-item" data-view="buyers" type="button">
+            <i data-lucide="building-2"></i><span>买家工作台</span>
+          </button>
+          <button class="nav-item" data-view="contacts" type="button">
+            <i data-lucide="contact-round"></i><span>联系人</span>
+          </button>
+          <button class="nav-item" data-view="operations" type="button">
+            <i data-lucide="gauge"></i><span>运行控制</span>
+          </button>
+          <button class="nav-item" data-view="campaigns" type="button">
+            <i data-lucide="mail-plus"></i><span>邮件实验室</span>
+          </button>
+          <button class="nav-item nav-item-emphasis" data-view="drafts" type="button">
+            <i data-lucide="files"></i><span>批量草稿</span>
+          </button>
+          <button class="nav-item" data-view="mailbox" type="button">
+            <i data-lucide="mailbox"></i><span>邮件中心</span>
+          </button>
+          <button class="nav-item" data-view="sender-profile" type="button">
+            <i data-lucide="badge-info"></i><span>发件配置</span>
+          </button>
+          <button class="nav-item" data-view="settings" type="button">
+            <i data-lucide="settings-2"></i><span>系统边界</span>
+          </button>
+        </nav>
+
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <button class="icon-button menu-button" id="menuButton" type="button" aria-label="打开导航" title="打开导航" aria-controls="sidebar" aria-expanded="false">
+            <i data-lucide="menu"></i>
+          </button>
+          <div class="topbar-heading">
+            <h1 id="viewTitle">数据总览</h1>
+          </div>
+          <div class="topbar-actions">
+            <div class="service-pill"><span class="status-dot"></span><span>本地数据已连接</span></div>
+            <button class="command-button" id="commandButton" type="button" aria-label="打开快速导航">
+              <i data-lucide="search"></i><span>快速导航</span><kbd>Ctrl K</kbd>
+            </button>
+            <button class="icon-button" id="refreshButton" type="button" aria-label="刷新数据" title="刷新数据">
+              <i data-lucide="refresh-cw"></i>
+            </button>
+          </div>
+        </header>
+
+        <main id="mainContent" class="main-content" aria-live="polite">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <span>正在读取采集结果</span>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <div class="toast-region" id="toastRegion" aria-live="assertive"></div>
+    <button class="mobile-scrim" id="mobileScrim" type="button" aria-label="关闭导航" tabindex="-1"></button>
+    <dialog class="command-dialog" id="commandDialog" aria-labelledby="commandTitle">
+      <form method="dialog" class="command-surface">
+        <div class="command-search">
+          <i data-lucide="search"></i>
+          <label class="sr-only" for="commandInput" id="commandTitle">快速导航</label>
+          <input id="commandInput" type="search" placeholder="搜索页面或操作" autocomplete="off" />
+          <kbd>Esc</kbd>
+        </div>
+        <div class="command-list" id="commandList" role="listbox" aria-label="可用页面"></div>
+      </form>
+    </dialog>
+  </body>
+</html>

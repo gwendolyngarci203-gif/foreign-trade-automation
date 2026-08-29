@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "planId": "example-managed-plan",
+  "mode": "managed",
+  "authorizedBy": "local-user",
+  "hsCodes": [
+    {
+      "hsCode": "000000",
+      "direction": "buyer",
+      "countries": [],
+      "startPage": 1
+    }
+  ],
+  "dailyBudgets": {
+    "buyerEntries": 100,
+    "companyDetails": 20,
+    "validEmailCompanies": 10,
+    "contactPages": 20,
+    "emailSends": 20,
+    "globalEmailHardCap": 200
+  },
+  "selection": {
+    "companyOrder": "trade_amount_desc_then_source_order",
+    "contactOrder": "purchasing_operations_then_management_then_relevant_roles",
+    "maxFirstTouchesPerCompanyPerDay": 2,
+    "draftContactsPerCompany": 4,
+    "dailyDraftTarget": 20,
+    "reviewMode": "central_batch",
+    "globalRecipientDedupe": true,
+    "draftPolicy": "best_safe_variant"
+  },
+  "delivery": {
+    "sender": "sender@example.com",
+    "company": "Your Company",
+    "phone": "",
+    "requiresDeliverableStatus": false,
+    "requiresSuppressionCheck": true,
+    "stopOnComplaintOrHardBounce": true
+  },
+  "compliance": {
+    "scope": "small_batch_business_exchange",
+    "providerApprovalBasis": "user_must_verify_provider_terms",
+    "approvedByUser": false,
+    "senderAccountCount": 1,
+    "perSenderDailyMaximum": 20,
+    "globalDailyMaximum": 20,
+    "limitedScopeOnly": true,
+    "notes": "示例计划默认不构成发送授权。使用者必须自行核实联系人许可、适用法律、服务商条款、退订、实体地址、抑制名单、反馈熔断和发送额度。"
+  },
+  "mandatoryHumanGates": [
+    "captcha",
+    "credential_error",
+    "permission",
+    "mfa"
+  ]
+}

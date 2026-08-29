@@ -1,0 +1,93 @@
+{
+  "version": "1.0.0",
+  "source": "user-provided template",
+  "candidatePolicy": "For one buyer brief, generate 1-3 candidate output types and keep only the candidate explicitly selected by the operator.",
+  "globalRules": {
+    "subject": "Use 4-8 plain words tied to the buyer's product or the contact's responsibility. Do not use clickbait, fake replies, or generic partnership language.",
+    "greeting": "Use Hi plus the recipient contact's first name. Use Hi team only when no named contact exists. This personalization applies to the recipient, not the sender identity.",
+    "senderIdentity": "First-round outreach is sent only in the company identity. Use we/our, never an employee name, personal title, personal signature, or first-person singular sender introduction.",
+    "structure": [
+      "One buyer-specific relevance sentence based only on supplied evidence.",
+      "One matching capability sentence based on the sender's verified profile.",
+      "At most one approved proof point or approved image reference.",
+      "One low-pressure, role-appropriate question.",
+      "A factual company signature using only supplied company fields."
+    ],
+    "prohibited": [
+      "How are you",
+      "dear",
+      "long-time admirer",
+      "unsupported praise or familiarity",
+      "HS code, customs records, import data, scraping, or discovery source",
+      "more than one call to action"
+    ],
+    "assetPolicy": "Default to no image for first touch. Use at most one approved product or factory image unless the exhibition scenario explicitly allows two. Never imply an attachment when no asset is selected."
+  },
+  "replyPolicy": {
+    "firstRound": "Company identity and company mailbox only.",
+    "replyRouting": "All replies and unsubscribe requests return to the sending company mailbox.",
+    "secondRound": {
+      "status": "reserved_blank",
+      "subject": "",
+      "body": "",
+      "rule": "Create only after a real reply is received and assigned; do not prefill employee identity."
+    }
+  },
+  "scenarios": {
+    "first_touch": {
+      "referenceIntent": "General first approach based on the source document's product-fit, sample, quotation, and optional OA ideas.",
+      "blueprint": [
+        "Hi {{first_name}},",
+        "State the buyer-specific product relevance.",
+        "Introduce one matching verified product or service capability.",
+        "Use a client reference, payment terms, experience claim, or product image only when explicitly approved.",
+        "Ask for one current specification, RFQ, or permission to send a relevant sample."
+      ],
+      "preferredAssets": []
+    },
+    "factory_proof": {
+      "referenceIntent": "Factory-capability follow-up based on the source document's facility evidence, production proof, and recent-project examples.",
+      "blueprint": [
+        "Hi {{first_name}},",
+        "Connect the recipient's role or project to a concrete production issue.",
+        "Mention approved factory evidence and only the capabilities supplied in the brief.",
+        "Use the 15-day lead-time claim only when explicitly approved for the specification and quantity.",
+        "Ask for one specification or a short technical discussion."
+      ],
+      "preferredAssets": []
+    },
+    "exhibition_booth": {
+      "referenceIntent": "Formal booth invitation based on the source document's event date, booth, venue, address, and sample-display format.",
+      "blueprint": [
+        "Hi {{first_name}},",
+        "Reference the verified event and the recipient's product relevance.",
+        "List only supplied date, booth, venue, and address details.",
+        "Mention approved display samples or images only when selected.",
+        "Ask for a brief meeting window at the booth."
+      ],
+      "preferredAssets": []
+    },
+    "exhibition_city_visit": {
+      "referenceIntent": "Local meeting option based on the source document's exhibition-or-company-visit format.",
+      "blueprint": [
+        "Hi {{first_name}},",
+        "Reference the verified event dates and city.",
+        "Offer a short meeting at the supplied exhibition location or the recipient's office without pressure.",
+        "Tie the meeting to one relevant product category or sample set.",
+        "Ask which of the two supplied meeting options is easier."
+      ],
+      "preferredAssets": []
+    },
+    "exhibitor_meeting": {
+      "referenceIntent": "Exhibitor-to-exhibitor meeting based on supplied event and category evidence.",
+      "blueprint": [
+        "Hi {{first_name}},",
+        "Reference the recipient's verified exhibitor status.",
+        "Name only the matching product category supported by supplied evidence.",
+        "Offer a brief booth visit rather than a broad partnership pitch.",
+        "Ask for a practical time window during the show."
+      ],
+      "preferredAssets": []
+    }
+  }
+}
