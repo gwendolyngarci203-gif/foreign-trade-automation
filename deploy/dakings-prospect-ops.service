@@ -1,0 +1,49 @@
+[Unit]
+Description=Dakings Prospect Ops
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=prospectops
+Group=prospectops
+WorkingDirectory=/opt/dakings-prospect-ops/app
+EnvironmentFile=/opt/dakings-prospect-ops/deploy/.env.runtime
+# Optional FEEDBACK_WEBHOOK_SECRET is loaded only from the mode-600 EnvironmentFile.
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=4173
+Environment=SOURCE_PATH=/opt/dakings-prospect-ops/deploy/source/source.json
+Environment=CAMPAIGN_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/campaigns.json
+Environment=VALIDATION_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/contact-validation.json
+Environment=SUPPRESSION_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/suppressions.json
+Environment=OPERATIONS_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/operations.json
+Environment=CONTACT_COLLECTION_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/contact-collection.json
+Environment=CONTACT_COLLECTION_ARTIFACT_DIR=/opt/dakings-prospect-ops/deploy/runtime-data/contact-collection-batches
+Environment=PIPELINE_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/pipeline.json
+Environment=PIPELINE_ARTIFACT_DIR=/opt/dakings-prospect-ops/deploy/runtime-data/pipeline-artifacts
+Environment=OUTBOX_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/outbox.json
+Environment=RUNTIME_STATE_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/runtime-state.json
+Environment=SENDER_PROFILE_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/sender-profile.json
+Environment=SENDER_ACCOUNTS_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/sender-accounts.json
+Environment=MAILBOX_ACCOUNTS_PATH=/opt/dakings-prospect-ops/deploy/mailbox-accounts.json
+Environment=MAILBOX_STORE_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/mailboxes.json
+Environment=MAILBOX_REPLY_STORE_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/mailbox-replies.json
+Environment=LOCAL_BACKUP_DIR=/opt/dakings-prospect-ops/deploy/runtime-data/backups
+ExecStart=/usr/bin/node /opt/dakings-prospect-ops/app/server.mjs
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dakings-prospect-ops/deploy/runtime-data
+ReadOnlyPaths=/opt/dakings-prospect-ops/app /opt/dakings-prospect-ops/deploy/source /opt/dakings-prospect-ops/deploy/mailbox-accounts.json
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

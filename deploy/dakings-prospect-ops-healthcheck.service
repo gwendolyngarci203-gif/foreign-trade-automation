@@ -1,0 +1,16 @@
+[Unit]
+Description=Validate Dakings Prospect Ops runtime health and safety boundaries
+After=dakings-prospect-ops.service nginx.service
+Wants=dakings-prospect-ops.service nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dakings-prospect-ops/deploy/healthcheck.sh
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/dakings-prospect-ops/deploy/runtime-data
+RestrictSUIDSGID=true
+LockPersonality=true

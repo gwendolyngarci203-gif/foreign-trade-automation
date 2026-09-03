@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "planId": "managed-hscode-20260823",
+  "mode": "managed",
+  "authorizedBy": "user-plan-authorization-2026-08-23",
+  "hsCodes": [
+    {
+      "hsCode": "4903000",
+      "direction": "buyer",
+      "countries": [],
+      "startPage": 8
+    }
+  ],
+  "dailyBudgets": {
+    "buyerEntries": 1200,
+    "companyDetails": 400,
+    "validEmailCompanies": 100,
+    "contactPages": 400,
+    "emailSends": 500,
+    "globalEmailHardCap": 500
+  },
+  "selection": {
+    "companyOrder": "trade_amount_desc_then_source_order",
+    "contactOrder": "purchasing_operations_then_management_then_relevant_roles",
+    "maxFirstTouchesPerCompanyPerDay": 2,
+    "draftContactsPerCompany": 4,
+    "dailyDraftTarget": 500,
+    "reviewMode": "central_batch",
+    "globalRecipientDedupe": true,
+    "draftPolicy": "best_safe_variant"
+  },
+  "delivery": {
+    "sender": "maggie1@dakingscc.cc",
+    "company": "DaKings Cultural and Creative Co., Ltd",
+    "phone": "17724279872",
+    "requiresDeliverableStatus": false,
+    "requiresSuppressionCheck": true,
+    "stopOnComplaintOrHardBounce": true
+  },
+  "compliance": {
+    "scope": "small_batch_business_exchange",
+    "providerApprovalBasis": "company_reported_provider_approval",
+    "approvedByUser": true,
+    "senderAccountCount": 10,
+    "perSenderDailyMaximum": 50,
+    "globalDailyMaximum": 500,
+    "limitedScopeOnly": true,
+    "notes": "当前阶段按10个邮箱各最多50封、全局500封执行；后续提额仍需独立灰度和服务商指标核验。退订、实体地址、抑制名单、反馈熔断、全局防重、每家公司每日最多2位联系人及全局硬上限仍为强制门。"
+  },
+  "mandatoryHumanGates": [
+    "captcha",
+    "credential_error",
+    "permission",
+    "mfa"
+  ]
+}

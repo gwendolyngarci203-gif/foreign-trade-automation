@@ -1,0 +1,17 @@
+import assert from "node:assert/strict";
+import { qualifyBuyers, scoreCompany } from "../company-qualification.mjs";
+const base = { company: "Book Importer GmbH", country: "Germany", hsCodes: ["4903000"], transactions: 4, productDescription: "book distributor" };
+assert.equal(scoreCompany(base, { enabled: false }).passed, true);
+assert.ok(scoreCompany(base, { enabled: true, targetCountries: ["United States"] }).reasons.includes("country_mismatch"));
+assert.ok(scoreCompany(base, { enabled: true, businessKeywords: ["manufacturer"] }).reasons.includes("business_mismatch"));
+assert.equal(scoreCompany(base, { enabled: true, targetCountries: ["Germany"], businessKeywords: ["importer"], excludeKeywords: ["logistics"] }).score, 100);
+assert.equal(scoreCompany({ ...base, company: "Freight Logistics GmbH" }, { enabled: true, targetCountries: ["Germany"], businessKeywords: ["importer"], excludeKeywords: ["logistics"] }).passed, false);
+assert.equal(scoreCompany(base, { enabled: true, targetHsCodes: ["4903000"] }).passed, true);
+assert.equal(scoreCompany(base, { enabled: true, targetHsCodes: ["847130"] }).passed, false);
+assert.ok(scoreCompany(base, { enabled: true, allowedCompanyTypes: ["manufacturer"] }).reasons.includes("company_type_mismatch"));
+assert.equal(scoreCompany(base, { enabled: true, minimumScore: 101 }).passed, true);
+assert.equal(scoreCompany(base, { enabled: false, targetHsCodes: ["does-not-match"], minimumScore: 100 }).score, 100);
+const result = qualifyBuyers({ buyers: [base] }, { enabled: true, targetCountries: ["Germany"] });
+assert.equal(result.buyers[0].qualification.passed, true);
+assert.equal(result.buyers[0].qualification.score, 100);
+console.log(JSON.stringify({ ok: true, score: result.buyers[0].qualification.score }));

@@ -1,0 +1,26 @@
+[Unit]
+Description=Dakings read-only IMAP feedback adapter
+After=network-online.target dakings-prospect-ops.service
+Requires=dakings-prospect-ops.service
+
+[Service]
+Type=oneshot
+User=prospectops
+Group=prospectops
+WorkingDirectory=/opt/dakings-prospect-ops
+EnvironmentFile=/opt/dakings-prospect-ops/deploy/.env.runtime
+Environment=IMAP_HOST=imap.qiye.aliyun.com
+Environment=IMAP_PORT=993
+Environment=FEEDBACK_API_BASE=http://127.0.0.1:4173
+Environment=IMAP_FEEDBACK_STATE_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/imap-feedback-state.json
+Environment=MAILBOX_ACCOUNTS_PATH=/opt/dakings-prospect-ops/deploy/mailbox-accounts.json
+Environment=MAILBOX_STORE_PATH=/opt/dakings-prospect-ops/deploy/runtime-data/mailboxes.json
+Environment=MAILBOX_INITIAL_SYNC_LIMIT=50
+Environment=MAILBOX_RETAIN_LIMIT=200
+ExecStart=/usr/bin/python3 /opt/dakings-prospect-ops/tools/imap-feedback-poller.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dakings-prospect-ops/deploy/runtime-data
+ReadOnlyPaths=/opt/dakings-prospect-ops/deploy/mailbox-accounts.json

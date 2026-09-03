@@ -1,0 +1,48 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const html = fs.readFileSync("app/public/index.html", "utf8");
+const css = fs.readFileSync("app/public/styles.css", "utf8");
+const app = fs.readFileSync("app/public/app.js", "utf8");
+const tokens = fs.readFileSync("app/public/tokens.css", "utf8");
+
+assert.match(html, /viewport-fit=cover/);
+assert.match(html, /aria-controls="sidebar" aria-expanded="false"/);
+assert.match(html, /data-view="mailbox"/);
+assert.match(html, /data-view="foundation"/);
+assert.doesNotMatch(html, /data-view="workflow"/, "采集流程已从主导航隐藏");
+assert.doesNotMatch(html, /id="deliveryStatus"|网易数据：|id="viewEyebrow"/);
+assert.match(html, /id="commandDialog"/);
+assert.match(html, /href="\/tokens\.css"/);
+assert.match(css, /html, body \{ min-height: 100%; overflow-x: clip; \}/);
+assert.match(css, /\.button\.small \{ min-height: 44px; \}/);
+assert.match(css, /\.mailbox-layout \{ grid-template-columns: 1fr; \}/);
+assert.match(css, /\.table-shell \{[^}]*max-height: min\(70vh, 760px\);[^}]*overflow: auto;/);
+assert.match(css, /th \{ position: sticky; top: 0; z-index: 2;/);
+assert.match(app, /function setMobileNavOpen\(open\)/);
+assert.match(app, /event\.key === "Escape"/);
+assert.doesNotMatch(app, /style="width:/, "CSP must not block progress rendering");
+assert.match(app, /<progress class="progress-track/);
+assert.match(app, /function renderMailbox\(\)/);
+assert.match(app, /data-testid="mailbox-reply-center"/);
+assert.match(app, /const inventoryCompanyCount = Number\(state\.inventory/);
+assert.match(app, /Promise\.allSettled\(requests\)/);
+assert.doesNotMatch(app, /风险与下一关卡/);
+assert.match(app, /function dailyMeter\(/);
+assert.match(app, /data-testid="daily-task-status"/);
+assert.match(app, /今日任务：/);
+assert.match(app, /badge\(dailyStatus\.code\)/);
+assert.doesNotMatch(app, /pipelineStatus/);
+assert.match(app, /id="overviewManagedPlanForm"/);
+assert.match(app, /function switchOverviewManagedPlan\(/);
+assert.doesNotMatch(app, /eyebrow\.textContent/);
+assert.match(app, /function renderFoundation\(\)/);
+assert.doesNotMatch(app, /class="mission-next"/);
+assert.doesNotMatch(app, /compliance-callout/);
+assert.match(app, /api\("\/api\/managed-plan"\)/);
+assert.doesNotMatch(css, /\.mission-console \{ grid-template-columns: minmax\(0, 1fr\) minmax/);
+assert.match(app, /event\.key\.toLowerCase\(\) === "k"/);
+assert.match(tokens, /--color-accent-ink:/);
+assert.match(tokens, /--font-display:/);
+
+console.log("mobile responsive unit passed");

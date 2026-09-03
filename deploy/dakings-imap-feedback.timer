@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll the Dakings company inbox every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=dakings-imap-feedback.service
+
+[Install]
+WantedBy=timers.target

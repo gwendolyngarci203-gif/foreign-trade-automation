@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Dakings pipeline worker every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+RandomizedDelaySec=20s
+Persistent=true
+Unit=dakings-pipeline-worker.service
+
+[Install]
+WantedBy=timers.target

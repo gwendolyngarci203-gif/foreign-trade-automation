@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Dakings Prospect Ops health checks every 15 minutes
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=15m
+RandomizedDelaySec=2m
+AccuracySec=1m
+Unit=dakings-prospect-ops-healthcheck.service
+
+[Install]
+WantedBy=timers.target

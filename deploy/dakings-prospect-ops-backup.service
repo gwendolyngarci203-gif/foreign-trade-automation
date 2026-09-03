@@ -1,0 +1,9 @@
+[Unit]
+Description=Backup Dakings Prospect Ops runtime data
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dakings-prospect-ops/deploy/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

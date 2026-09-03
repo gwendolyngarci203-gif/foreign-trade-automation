@@ -1,0 +1,31 @@
+[Unit]
+Description=DaKings managed NetEase collection batch
+After=network-online.target dakings-prospect-ops.service dakings-netease-browser.service
+Requires=dakings-prospect-ops.service dakings-netease-browser.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=3h
+User=prospectops
+Group=prospectops
+WorkingDirectory=/opt/dakings-prospect-ops
+EnvironmentFile=/opt/dakings-prospect-ops/deploy/.env.runtime
+Environment=COLLECTION_SERVICE=http://127.0.0.1:4173
+Environment=EDGE_CDP_ENDPOINT=http://127.0.0.1:9224
+Environment=WS_MODULE=/opt/dakings-prospect-ops/browser-runtime/node_modules/ws
+Environment=PLAYWRIGHT_MODULE=/opt/dakings-prospect-ops/browser-runtime/node_modules/playwright-core
+Environment=PLAYWRIGHT_MODULE_PATH=/opt/dakings-prospect-ops/browser-runtime/node_modules/playwright-core
+Environment=PYTHON_EXE=/usr/bin/python3
+Environment=MANAGED_HANDOFF_LOCAL=1
+Environment=PIPELINE_API_BASE=http://127.0.0.1:4173
+Environment=PIPELINE_INPUT_ROOT=/opt/dakings-prospect-ops/deploy/runtime-data/pipeline-inputs
+Environment=PIPELINE_ARTIFACT_DIR=/opt/dakings-prospect-ops/deploy/runtime-data/pipeline-artifacts
+ExecStartPre=/usr/bin/timeout 45 /bin/sh -c 'until /usr/bin/curl -fsS http://127.0.0.1:9224/json/version >/dev/null; do /usr/bin/sleep 1; done'
+ExecStart=/usr/bin/node /opt/dakings-prospect-ops/tools/run-managed-hscode-plan.mjs /opt/dakings-prospect-ops/plans/managed-hscode-plan.json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dakings-prospect-ops/.codex_work /opt/dakings-prospect-ops/outputs /opt/dakings-prospect-ops/tmp /opt/dakings-prospect-ops/deploy/runtime-data
+RestrictSUIDSGID=true
+LockPersonality=true

@@ -1,0 +1,30 @@
+[Unit]
+Description=DaKings isolated NetEase browser
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=prospectops
+Group=prospectops
+WorkingDirectory=/opt/dakings-prospect-ops
+Environment=HOME=/opt/dakings-prospect-ops/browser-runtime/home
+Environment=LANG=zh_CN.UTF-8
+Environment=LC_ALL=zh_CN.UTF-8
+ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1440x900x24 -nolisten tcp" /usr/bin/chromium-browser --lang=zh-CN --remote-debugging-address=127.0.0.1 --remote-debugging-port=9224 --remote-allow-origins=http://127.0.0.1:9224 --user-data-dir=/opt/dakings-prospect-ops/browser-runtime/profile --no-first-run --no-default-browser-check --disable-dev-shm-usage --password-store=basic https://waimao.office.163.com/#wmData?page=globalSearch
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dakings-prospect-ops/browser-runtime
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryHigh=800M
+MemoryMax=1200M
+TasksMax=160
+
+[Install]
+WantedBy=multi-user.target

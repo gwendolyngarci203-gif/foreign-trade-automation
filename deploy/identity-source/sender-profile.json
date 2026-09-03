@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "status": "configured",
+  "identityMode": "company_first_round",
+  "senderName": "",
+  "senderTitle": "",
+  "companyLegalName": "DaKings Cultural and Creative Co., Ltd",
+  "companyLegalNameZh": "广州华锐文化创意有限公司",
+  "companyAliases": [
+    "Guangzhou DaKings Printing Co., Ltd",
+    "DaKings Printing Company",
+    "Dakings Printing"
+  ],
+  "unifiedSocialCreditCode": "91440112MADC5UTQ82",
+  "legalRepresentative": "吴善华",
+  "registeredCapital": "100万元人民币",
+  "establishedDate": "2024-03-01",
+  "businessTerm": "2024-03-01 至 长期",
+  "registrationAddress": "广东省广州市黄埔区科学城科汇一街2号701房",
+  "businessScope": "国内贸易代理;包装服务;广告设计、代理;文艺创作;货物进出口;包装装潢印刷品印刷;特定印刷品印刷",
+  "legalIdentityStatus": "verified_business_license",
+  "legalIdentityConfirmedAt": "2026-08-19T20:12:39+08:00",
+  "legalIdentityConfirmedBy": "Made-in-China verified business license page; CAPTCHA completed by user",
+  "companyDisplayName": "DaKings Printing Company",
+  "senderEmail": "maggie1@dakingscc.cc",
+  "replyTo": "maggie1@dakingscc.cc",
+  "phone": "17724279872",
+  "website": "http://www.dakingscc.com/",
+  "physicalAddress": "Room 701, No. 2, Kehui 1st Street, Science City, Huangpu District, Guangzhou, Guangdong, China",
+  "unsubscribeMode": "reply_only",
+  "unsubscribeBaseUrl": "",
+  "unsubscribeReplyMailbox": "maggie1@dakingscc.cc",
+  "replyRouting": "company_inbox",
+  "secondRound": {
+    "status": "reserved_blank",
+    "subject": "",
+    "body": ""
+  },
+  "updatedAt": "2026-08-19T20:12:39+08:00",
+  "updatedBy": "verified-business-license-and-user-confirmed-english-identity-2026-08-19"
+}

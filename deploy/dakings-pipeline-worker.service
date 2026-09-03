@@ -1,0 +1,21 @@
+[Unit]
+Description=Dakings Prospect Ops pipeline worker
+After=dakings-prospect-ops.service
+Requires=dakings-prospect-ops.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=30min
+User=prospectops
+Group=prospectops
+WorkingDirectory=/opt/dakings-prospect-ops
+EnvironmentFile=/opt/dakings-prospect-ops/deploy/.env.runtime
+Environment=PIPELINE_API_BASE=http://127.0.0.1:4173
+Environment=PIPELINE_INPUT_ROOT=/opt/dakings-prospect-ops/deploy/runtime-data/pipeline-inputs
+Environment=PIPELINE_ARTIFACT_DIR=/opt/dakings-prospect-ops/deploy/runtime-data/pipeline-artifacts
+ExecStart=/usr/bin/node /opt/dakings-prospect-ops/app/pipeline-worker.mjs --drain --max-jobs 6
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dakings-prospect-ops/deploy/runtime-data
