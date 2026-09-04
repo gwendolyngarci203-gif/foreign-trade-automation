@@ -1,7 +1,7 @@
 # Production Baseline
 
 - Baseline: cloud Phase 7 complete
-- Commit: 49acf9a91f47633857d08dc43f608e2450f21d04
+- Commit: e87721dcf07380ace6eed68afefe335c6caeaa25
 - Captured at: 2026-09-04 Asia/Shanghai
 - Runtime root: `/opt/dakings-prospect-ops/deploy/runtime-data/`
 - Services at capture: `dakings-prospect-ops.service=active`; `dakings-pipeline-worker.service=inactive (oneshot idle)`; `dakings-managed-collection.service=failed (NetEase session gate)`
