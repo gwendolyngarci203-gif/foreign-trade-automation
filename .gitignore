@@ -25,3 +25,8 @@ deploy/mailbox-accounts.json
 *.upload-*
 __pycache__/
 *.pyc
+
+.codex_work/
+deploy/backups/
+*.tar.gz
+*.bundle
