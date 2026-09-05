@@ -46,15 +46,20 @@ async function scriptJson(script, args, timeout = 45_000) {
     if (error.stdout) {
       try { return JSON.parse(error.stdout); } catch { /* use control error below */ }
     }
+    const diagnostic = String(error.stderr || "").match(/(SEARCH_STATE_MISMATCH|TARGET_CHANGED|EXACT_MODE_LOST|RESULT_NOT_READY|CDP_RUNTIME_TIMEOUT):[^\r\n]*/);
+    if (diagnostic) throw new Error(diagnostic[0]);
     throw error;
   }
 }
 
-async function collectVisible(companyName, submittedQuery = companyName, contactPage = 1) {
+async function collectVisible(companyName, submittedQuery = companyName, contactPage = 1, searchState = null) {
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      return await scriptJson(client, ["collect-current-visible", companyName, "--submitted-query", submittedQuery, "--contact-page", String(contactPage)]);
+      const binding = searchState?.targetId
+        ? ["--target-id", searchState.targetId, "--result-signature", searchState.resultSignature || ""]
+        : [];
+      return await scriptJson(client, ["collect-current-visible", companyName, "--submitted-query", submittedQuery, "--contact-page", String(contactPage), ...binding]);
     } catch (error) {
       lastError = error;
       const transientRender = /visible result rows were not located|Current result does not belong/.test(String(error.message || error));
@@ -87,7 +92,7 @@ async function collectItem(item) {
       const severe = safetyResult(item, search);
       if (severe) return severe;
       await delay(800);
-      const collected = await collectVisible(item.companyName, submittedQuery, item.contactPage || item.contactNextPage || 1);
+      const collected = await collectVisible(item.companyName, submittedQuery, item.contactPage || item.contactNextPage || 1, search);
       const postSafety = safetyResult(item, collected.safety || {});
       return postSafety || { ...collected, submittedQuery };
     } catch (error) {
@@ -134,9 +139,11 @@ for (; processed < limit; processed += 1) {
   } catch (error) {
     const message = String(error.message || error).slice(0, 500);
     const disconnected = /ECONNREFUSED|WebSocket|browser.*closed|connectOverCDP|No fixed-element-ready/i.test(message);
+    const structured = /^(SEARCH_STATE_MISMATCH|TARGET_CHANGED|EXACT_MODE_LOST|RESULT_NOT_READY|CDP_RUNTIME_TIMEOUT):/.exec(message)?.[1]
+      || (/CDP Runtime\.evaluate timed out/i.test(message) ? "CDP_RUNTIME_TIMEOUT" : "");
     result = {
-      status: disconnected ? "browser_disconnected" : "timeout",
-      signal: disconnected ? "browser_disconnected" : "control_timeout",
+      status: disconnected ? "browser_disconnected" : structured || "error",
+      signal: disconnected ? "browser_disconnected" : structured || "control_timeout",
       error: message,
       company: {},
       contacts: [],

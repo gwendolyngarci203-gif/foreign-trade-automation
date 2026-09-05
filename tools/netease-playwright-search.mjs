@@ -43,7 +43,18 @@ try {
     await page.getByRole("tab", { name: "按公司", exact: true }).waitFor({ timeout: 30_000 });
   }
 
-  for (const closeButton of await page.locator(".ant-drawer-close:visible").all()) await closeButton.click().catch(() => {});
+  const viewport = page.viewportSize() || await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  for (const closeButton of await page.locator(".ant-drawer-close:visible").all()) {
+    const box = await closeButton.boundingBox().catch(() => null);
+    const intersectsViewport = box && box.width > 0 && box.height > 0
+      && box.x < viewport.width && box.y < viewport.height
+      && box.x + box.width > 0 && box.y + box.height > 0;
+    if (!intersectsViewport) {
+      console.error("DRAWER_SKIPPED_HIDDEN_OR_OFFSCREEN");
+      continue;
+    }
+    await closeButton.click().catch(() => {});
+  }
   const companyTab = page.getByRole("tab", { name: "按公司", exact: true });
   if (await companyTab.getAttribute("aria-selected") !== "true") await companyTab.click();
   const input = page.locator('input[placeholder="请输入公司名称"]:visible');
@@ -110,23 +121,46 @@ try {
     const table = [...document.querySelectorAll("table")]
       .find((candidate) => candidate.querySelector('tr[data-row-key]') && candidate.innerText.includes("一键营销"));
     const count = text.match(/为您找到\s*([0-9+]+)\s*个结果/)?.[1] || "";
+    const resultSignature = table?.innerText?.trim() || (text.includes("暂无数据，可尝试去网页搜索最新内容") ? `empty:${count || "0"}` : "");
     return {
       companyName: expected,
       submittedValue: input?.value || "",
       exact: Boolean(exact?.checked),
       resultCount: count,
+      resultSignature,
       rendered: Boolean(table) || text.includes("暂无数据，可尝试去网页搜索最新内容"),
       captcha: /(?:需要|请|点击|输入|完成|人机|安全).{0,20}(?:验证码|安全验证)|(?:验证码|安全验证).{0,20}(?:弹窗|输入|失败|过期|重试)/.test(text) || [...document.querySelectorAll('iframe[src*="captcha" i], iframe[title*="captcha" i], [id*="captcha" i], [class*="captcha" i], input[placeholder*="验证码"]')].some(el => el.offsetWidth || el.offsetHeight),
       rateLimited: /操作频繁|访问过于频繁|请求过于频繁/.test(text),
       accountError: /权限不足|暂无权限|无权访问|联系(?:相应)?管理员|账号异常|登录已失效|重新登录/.test(text),
     };
   }, companyName);
-  if (result.submittedValue !== companyName || !result.exact) throw new Error("Submitted form does not match exact company query");
+  const targetList = await (await fetch(`${endpoint}/json/list`)).json().catch(() => []);
+  const targetId = targetList.find((target) => target.type === "page" && target.url === page.url())?.id || "";
+  if (!targetId) {
+    const error = new Error("TARGET_CHANGED: searched page target could not be resolved");
+    error.code = "TARGET_CHANGED";
+    throw error;
+  }
+  if (result.submittedValue !== companyName) {
+    const error = new Error("SEARCH_STATE_MISMATCH: submitted value changed after search");
+    error.code = "SEARCH_STATE_MISMATCH";
+    throw error;
+  }
+  if (!result.exact) {
+    const error = new Error("EXACT_MODE_LOST: exact mode was not preserved after search");
+    error.code = "EXACT_MODE_LOST";
+    throw error;
+  }
   if (!result.rendered && !result.captcha && !result.rateLimited && !result.accountError) {
-    throw new Error("Global-search response completed but no result or explicit empty state rendered");
+    const error = new Error("RESULT_NOT_READY: global-search response completed without rendered result");
+    error.code = "RESULT_NOT_READY";
+    throw error;
   }
   console.log(JSON.stringify({
+    targetId,
     ...result,
+    query: companyName,
+    timestamp: new Date().toISOString(),
     responseStatus: response.status(),
     requestMatched: requestPayloadMatches,
     renderWaitMatched,

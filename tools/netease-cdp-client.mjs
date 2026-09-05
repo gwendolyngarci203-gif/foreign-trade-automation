@@ -959,16 +959,18 @@ if (command === "inspect") {
   })()`);
   await new Promise((resolve) => setTimeout(resolve, 300));
   await evaluate(target, `(() => {
-    const company = [...document.querySelectorAll('[role="tab"]')]
-      .find(el => (el.innerText || "").trim() === "按公司");
+    const company = document.querySelector('#rc-tabs-2-tab-company')
+      || [...document.querySelectorAll('[role="tab"]')]
+        .find(el => (el.innerText || "").trim() === "按公司"
+          && el.closest('[data-track-component="CustomsSearch"]'));
     if (!company) throw new Error("Company tab missing");
     company.click();
     return true;
   })()`);
   await new Promise((resolve) => setTimeout(resolve, 400));
   await evaluate(target, `(() => {
-    const exact = [...document.querySelectorAll('input[type="checkbox"]')]
-      .find(el => (el.offsetWidth || el.offsetHeight) && (el.parentElement?.parentElement?.innerText || "").includes("精确"));
+    const exact = [...document.querySelectorAll('.customsSearch-module--precise--si5IV input[type="checkbox"]')]
+      .find(el => (el.offsetWidth || el.offsetHeight));
     if (!exact) throw new Error("Exact checkbox missing");
     const input = [...document.querySelectorAll("input")]
       .find(el => el.placeholder === "请输入公司名称" && (el.offsetWidth || el.offsetHeight));
@@ -1008,8 +1010,8 @@ if (command === "inspect") {
       const text = document.body?.innerText || "";
       const input = [...document.querySelectorAll("input")]
         .find(el => el.placeholder === "请输入公司名称" && (el.offsetWidth || el.offsetHeight));
-      const exact = [...document.querySelectorAll('input[type="checkbox"]')]
-        .find(el => (el.offsetWidth || el.offsetHeight) && (el.parentElement?.parentElement?.innerText || "").includes("精确"));
+      const exact = [...document.querySelectorAll('.customsSearch-module--precise--si5IV input[type="checkbox"]')]
+        .find(el => (el.offsetWidth || el.offsetHeight));
       const countMatch = text.match(/为您找到\\s*([0-9+]+)\\s*个结果/);
       const requestCount = performance.getEntriesByType("resource")
         .filter(entry => entry.initiatorType === "fetch" || entry.initiatorType === "xmlhttprequest").length;
@@ -1044,16 +1046,24 @@ if (command === "inspect") {
     ? process.argv.slice(queryMarker + 1, contactPageMarker > queryMarker ? contactPageMarker : undefined).join(" ").trim()
     : expectedCompany;
   const requestedContactPage = Math.max(1, Number.parseInt(process.argv[contactPageMarker + 1] || "1", 10) || 1);
+  const targetIdMarker = process.argv.indexOf("--target-id");
+  const resultSignatureMarker = process.argv.indexOf("--result-signature");
+  const boundTargetId = targetIdMarker > 0 ? String(process.argv[targetIdMarker + 1] || "").trim() : "";
+  const boundResultSignature = resultSignatureMarker > 0 ? String(process.argv[resultSignatureMarker + 1] || "") : "";
   if (!expectedCompany) throw new Error("Expected company name is required");
   if (!submittedQuery) throw new Error("Submitted company query is required");
-  const ready = selectBusinessTarget(await inspectedPages());
+  const inspected = await inspectedPages();
+  const ready = boundTargetId
+    ? inspected.find((item) => item.targetId === boundTargetId && item.state?.businessReady)
+    : selectBusinessTarget(inspected);
+  if (boundTargetId && !ready) throw new Error(`TARGET_CHANGED: bound target ${boundTargetId} is no longer business-ready`);
   const target = ready.target;
   const initial = await evaluate(target, `(() => {
     const text = document.body?.innerText || "";
     const input = [...document.querySelectorAll("input")]
       .find(el => el.placeholder === "请输入公司名称" && (el.offsetWidth || el.offsetHeight));
-    const exact = [...document.querySelectorAll('input[type="checkbox"]')]
-      .find(el => (el.offsetWidth || el.offsetHeight) && (el.parentElement?.parentElement?.innerText || "").includes("精确"));
+    const exact = [...document.querySelectorAll('.customsSearch-module--precise--si5IV input[type="checkbox"]')]
+      .find(el => (el.offsetWidth || el.offsetHeight));
     const countMatch = text.match(/为您找到\\s*([0-9+]+)\\s*个结果/);
     const tables = [...document.querySelectorAll("table")];
     const resultTable = tables.find(table => table.querySelector('tr[data-row-key]')
@@ -1069,6 +1079,7 @@ if (command === "inspect") {
           || row.querySelector('[class*="table-company-name"]')?.innerText?.trim() || "",
         text: row.innerText || "",
       })),
+      resultSignature: resultTable?.innerText?.trim() || (text.includes("暂无数据，可尝试去网页搜索最新内容") ? "empty:" + (countMatch?.[1] || "0") : ""),
       captcha: /(?:需要|请|点击|输入|完成|人机|安全).{0,20}(?:验证码|安全验证)|(?:验证码|安全验证).{0,20}(?:弹窗|输入|失败|过期|重试)/.test(text) || [...document.querySelectorAll('iframe[src*="captcha" i], iframe[title*="captcha" i], [id*="captcha" i], [class*="captcha" i], input[placeholder*="验证码"]')].some(el => el.offsetWidth || el.offsetHeight),
       rateLimited: /操作频繁|访问过于频繁|请求过于频繁/.test(text),
       accountError: /权限不足|账号异常|登录已失效|重新登录/.test(text),
@@ -1078,9 +1089,10 @@ if (command === "inspect") {
     console.log(JSON.stringify({ targetId: ready.targetId, expectedCompany, safety: initial }, null, 2));
     process.exitCode = 3;
   } else {
-    if (initial.submittedValue !== submittedQuery || !initial.exact) {
-      throw new Error(`Current result does not belong to exact query ${submittedQuery}`);
-    }
+    if (boundTargetId && ready.targetId !== boundTargetId) throw new Error(`TARGET_CHANGED: expected ${boundTargetId}, got ${ready.targetId}`);
+    if (initial.submittedValue !== submittedQuery) throw new Error(`SEARCH_STATE_MISMATCH: expected ${submittedQuery}, got ${initial.submittedValue}`);
+    if (!initial.exact) throw new Error("EXACT_MODE_LOST: exact mode is no longer enabled");
+    if (boundResultSignature && initial.resultSignature !== boundResultSignature) throw new Error("SEARCH_STATE_MISMATCH: result signature changed before collection");
     const normalizeName = (value) => value.normalize("NFKC").toUpperCase().replace(/[^\p{L}\p{N}]+/gu, "");
     const expectedNormalized = normalizeName(expectedCompany);
     const queryNormalized = normalizeName(submittedQuery);
