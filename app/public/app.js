@@ -33,6 +33,7 @@ const state = {
   editingCampaignId: null,
   senderProfile: null,
   deliveryMode: { mode: "manual", automaticApprovalStillRequiresAllGates: true },
+  controlPlane: null,
   capacity: { simultaneousOnlineUsers: 100, pc: 100, mobile: 100, note: "" },
   controlLoadErrors: [],
   companyQualification: { enabled: false, targetCountries: [], businessKeywords: [], excludeKeywords: [], targetHsCodes: [], allowedCompanyTypes: [], minimumScore: 0, statistics: {} },
@@ -48,7 +49,7 @@ const viewMeta = {
   workflow: ["端到端状态", "采集流程"],
   buyers: ["139家原始买家", "买家工作台"],
   contacts: ["前20大买家", "联系人"],
-  operations: ["预算与安全状态", "运行控制"],
+  operations: ["生产恢复与安全状态", "生产指挥中心"],
   campaigns: ["未来发送流程", "邮件实验室"],
   drafts: ["批量内容审阅", "批量草稿"],
   mailbox: ["十账号统一收发", "邮件中心"],
@@ -186,7 +187,7 @@ function emptyState(icon, titleText, body) {
 }
 
 async function loadBase() {
-  const [health, summary, quality, workflowData, managedPlan, options, buyers, contacts, contactQuality, suppressions, operations, contactQueues, pipeline, countryBusiness, dailyBatch, inventory, outbox, mailbox, campaigns, senderProfile, deliveryMode, capacity, deliveryCapacity] = await Promise.all([
+  const [health, summary, quality, workflowData, managedPlan, options, buyers, contacts, contactQuality, suppressions, operations, contactQueues, pipeline, countryBusiness, dailyBatch, inventory, outbox, mailbox, campaigns, senderProfile, deliveryMode, capacity, deliveryCapacity, controlPlane] = await Promise.all([
     api("/api/health"),
     api("/api/summary"),
     api("/api/quality"),
@@ -210,6 +211,7 @@ async function loadBase() {
     api("/api/delivery-mode"),
     api("/api/capacity"),
     api("/api/delivery-capacity"),
+    api("/api/control-plane/status"),
   ]);
   state.health = health;
   state.summary = summary;
@@ -241,6 +243,7 @@ async function loadBase() {
   state.deliveryMode = deliveryMode;
   state.capacity = capacity;
   state.deliveryCapacity = deliveryCapacity;
+  state.controlPlane = controlPlane;
   renderDeliveryStatus();
 }
 
@@ -661,6 +664,155 @@ function renderOperations() {
       <section class="split-layout ops-layout">
         <div class="panel"><div class="panel-head"><h3>永久抑制名单</h3><span class="badge blocked">不可自动删除</span></div><form class="panel-body editor" id="suppressionForm"><div class="field"><label for="suppressionEmail">邮箱</label><input class="input" id="suppressionEmail" type="email" required /></div><div class="form-grid"><div class="field"><label for="suppressionReason">原因</label><select class="select" id="suppressionReason"><option value="opted_out">退订</option><option value="complaint">投诉</option><option value="hard_bounce">硬退信</option><option value="do_not_contact">明确拒绝联系</option><option value="manual">人工抑制</option></select></div><div class="field"><label for="suppressionSource">证据来源</label><input class="input" id="suppressionSource" value="local-admin" required /></div></div><button class="button danger" type="submit"><i data-lucide="ban"></i>加入永久抑制</button></form></div>
         <div class="panel"><div class="panel-head"><h3>最近抑制记录</h3><span class="badge neutral">只显示哈希前缀</span></div><div class="table-shell"><table><thead><tr><th>指纹</th><th>域名</th><th>原因</th><th>日期</th></tr></thead><tbody>${state.suppressions.items.slice(0, 10).map((item) => `<tr><td><code>${escapeHtml(item.fingerprint)}</code></td><td>${escapeHtml(item.domain)}</td><td>${escapeHtml(item.reason)}</td><td>${shortDate(item.createdAt)}</td></tr>`).join("") || `<tr><td colspan="4">暂无抑制记录</td></tr>`}</tbody></table></div></div>
+      </section>
+    </div>`;
+}
+
+function controlStatusBadge(value) {
+  const classes = {
+    healthy: "complete", active: "complete", running: "complete", scheduled: "complete", ok: "complete",
+    safe_hold: "review", manual: "review", locked: "blocked", blocked: "blocked", degraded: "blocked", error: "blocked",
+    inactive: "neutral", stopped: "neutral", unknown: "neutral",
+  };
+  const labels = {
+    healthy: "正常", safe_hold: "安全保持", blocked: "阻断", degraded: "降级", unknown: "未知",
+    active: "运行中", inactive: "未运行", running: "运行中", scheduled: "已调度", stopped: "已停止",
+    manual: "人工模式", auto: "自动模式", locked: "已锁定", ok: "正常", error: "异常",
+  };
+  return `<span class="badge ${classes[value] || "neutral"}">${escapeHtml(labels[value] || value || "-")}</span>`;
+}
+
+function controlWarningLabel(value) {
+  const labels = {
+    delivery_limit_config_mismatch: "生产政策为每日 1,000，但当前运行配置仍为 500",
+    collection_locked: "当前业务周期的采集锁仍生效",
+    active_queue_leases: "存在联系人队列租约",
+    pipeline_running: "存在正在运行的 Pipeline job",
+    active_outbox: "存在 active outbox 记录",
+    smtp_connection_while_manual: "Manual 模式下检测到 SMTP 连接",
+    release_metadata_unavailable: "恢复基线元数据不可读取",
+    runtime_probe_failed: "运行态探针失败",
+    smtp_socket_probe_failed: "SMTP socket 探针失败",
+  };
+  if (value.startsWith("systemd_probe_failed:")) return `systemd 探针失败：${value.split(":")[1]}`;
+  return labels[value] || value.replaceAll("_", " ");
+}
+
+function renderProductionCommandCenter() {
+  const control = state.controlPlane;
+  if (!control) return emptyState("server-off", "生产状态不可用", "只读控制面尚未返回有效快照");
+  const baseline = control.baseline || {};
+  const collection = control.collection || {};
+  const queues = control.queues || { counts: {} };
+  const pipeline = control.pipeline || { counts: {}, flow: {} };
+  const delivery = control.delivery || {};
+  const smtp = control.smtp || {};
+  const schedulers = control.schedulers || {};
+  const warnings = control.overall?.warnings || [];
+  const flow = [
+    ["search", "Discovery", pipeline.flow?.discovery || 0],
+    ["contact-round", "Contact", pipeline.flow?.contact || 0],
+    ["square-pen", "Draft", pipeline.flow?.draft || 0],
+    ["clipboard-check", "Approval", pipeline.flow?.approval || 0],
+    ["send", "Delivery", pipeline.flow?.delivery || 0],
+  ];
+  const unitRow = (label, unit) => `<tr><td>${escapeHtml(label)}</td><td>${controlStatusBadge(unit?.activeState || "unknown")}</td><td>${escapeHtml(unit?.subState || "-")}</td><td>${escapeHtml(unit?.lastTriggerAt || "-")}</td><td>${escapeHtml(unit?.nextTriggerAt || "-")}</td></tr>`;
+  return `
+    <div class="view-stack command-center">
+      <section class="control-status-band ${escapeHtml(control.overall?.state || "unknown")}">
+        <div><span class="control-eyebrow">PRODUCTION CONTROL PLANE</span><h2>${escapeHtml(control.overall?.state === "healthy" ? "生产链路正常" : control.overall?.state === "safe_hold" ? "生产系统处于安全保持" : "生产状态需要关注")}</h2><p>只读快照 · 不包含启动、解锁、审批或发送动作</p></div>
+        <div class="control-status-meta">${controlStatusBadge(control.overall?.state)}<span>快照 ${escapeHtml(shortDateTime(control.generatedAt))}</span></div>
+      </section>
+
+      <section class="control-baseline" aria-label="Recovery Baseline">
+        <div><span>Recovery baseline</span><strong><code>${escapeHtml(baseline.shortCommit || "unavailable")}</code></strong></div>
+        <div><span>Branch</span><strong>${escapeHtml(baseline.branch || "-")}</strong></div>
+        <div><span>Recovery phase</span><strong>${escapeHtml(baseline.recoveryPhase || "-")}</strong></div>
+        <div><span>Snapshot</span><strong>${escapeHtml(shortDateTime(control.generatedAt))}</strong></div>
+      </section>
+
+      <section class="control-grid">
+        <section class="panel control-section">
+          <div class="panel-head"><div><h3>Collection Engine</h3><span class="panel-caption">持续采集、业务周期和队列只读状态</span></div>${controlStatusBadge(collection.engine)}</div>
+          <div class="control-metrics">
+            <div><span>Queue</span><strong>${number(queues.total)}</strong></div>
+            <div><span>Pending</span><strong>${number(queues.counts?.pending)}</strong></div>
+            <div><span>Completed</span><strong>${number(queues.counts?.completed)}</strong></div>
+            <div><span>Collection lock</span><strong>${collection.cycle?.locked ? "LOCKED" : "OPEN"}</strong></div>
+          </div>
+          <div class="table-shell compact-table"><table><thead><tr><th>Scheduler</th><th>状态</th><th>子状态</th><th>最近触发</th><th>下次触发</th></tr></thead><tbody>
+            ${unitRow("Managed timer", schedulers.managed?.timer)}
+            ${unitRow("Managed service", schedulers.managed?.service)}
+            ${unitRow("Pipeline timer", schedulers.pipeline?.timer)}
+            ${unitRow("Pipeline service", schedulers.pipeline?.service)}
+          </tbody></table></div>
+        </section>
+
+        <section class="panel control-section">
+          <div class="panel-head"><div><h3>Delivery</h3><span class="panel-caption">政策额度与当前有效配置分开显示</span></div>${controlStatusBadge(delivery.mode)}</div>
+          <div class="control-metrics">
+            <div><span>Daily policy</span><strong>${number(delivery.policyDailyLimit)}</strong></div>
+            <div><span>Used</span><strong>${number(delivery.used)}</strong></div>
+            <div><span>Remaining</span><strong>${number(delivery.remaining)}</strong></div>
+            <div><span>SMTP</span><strong>${smtp.configured ? "READY" : "NOT READY"}</strong></div>
+          </div>
+          <div class="control-detail-list">
+            <div><span>当前有效上限</span><strong>${number(delivery.effectiveDailyLimit)}</strong></div>
+            <div><span>当前有效剩余</span><strong>${number(delivery.effectiveRemaining)}</strong></div>
+            <div><span>自动发送</span><strong>${delivery.automaticSendingEnabled ? "ENABLED" : "BLOCKED"}</strong></div>
+            <div><span>SMTP established</span><strong>${smtp.establishedConnections == null ? "UNKNOWN" : number(smtp.establishedConnections)}</strong></div>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel control-section">
+        <div class="panel-head"><div><h3>Pipeline Flow</h3><span class="panel-caption">${number(pipeline.total)} 个 job · ${number(pipeline.claimable)} 个可领取</span></div>${pipeline.counts?.running ? controlStatusBadge("running") : controlStatusBadge("safe_hold")}</div>
+        <div class="control-flow">${flow.map(([icon, label, count], index) => `<div class="control-flow-step"><span><i data-lucide="${icon}"></i></span><strong>${label}</strong><small>${number(count)} jobs</small></div>${index < flow.length - 1 ? `<i class="control-flow-arrow" data-lucide="arrow-right"></i>` : ""}`).join("")}</div>
+      </section>
+
+      <section class="control-grid">
+        <section class="panel control-section">
+          <div class="panel-head"><div><h3>Safety</h3><span class="panel-caption">Lease、outbox 与探针异常</span></div>${warnings.length ? controlStatusBadge("blocked") : controlStatusBadge("healthy")}</div>
+          <div class="control-metrics">
+            <div><span>Queue leases</span><strong>${number(queues.activeLeases)}</strong></div>
+            <div><span>Expired observed</span><strong>${number(queues.expiredLeasesObserved)}</strong></div>
+            <div><span>Pipeline leases</span><strong>${number(pipeline.activeLeases)}</strong></div>
+            <div><span>Active outbox</span><strong>${number(control.outbox?.active)}</strong></div>
+          </div>
+          <div class="control-warning-list">${warnings.length ? warnings.map((item) => `<div><i data-lucide="triangle-alert"></i><span>${escapeHtml(controlWarningLabel(item))}</span></div>`).join("") : `<div class="control-clear"><i data-lucide="shield-check"></i><span>当前没有控制面警告</span></div>`}</div>
+        </section>
+
+        <section class="panel control-section">
+          <div class="panel-head"><div><h3>Outbox</h3><span class="panel-caption">生命周期计数，不展示收件人数据</span></div>${control.outbox?.active ? controlStatusBadge("blocked") : controlStatusBadge("healthy")}</div>
+          <div class="control-detail-list">
+            ${Object.entries(control.outbox?.counts || {}).map(([status, count]) => `<div><span>${escapeHtml(status)}</span><strong>${number(count)}</strong></div>`).join("")}
+          </div>
+        </section>
+      </section>
+
+      <section class="panel control-section">
+        <div class="panel-head"><div><h3>Audit Timeline</h3><span class="panel-caption">跨 collection、queue、pipeline、outbox 的脱敏事件</span></div><span class="badge neutral">${number(control.audit?.returned)} events</span></div>
+        <div class="table-shell audit-table"><table><thead><tr><th>时间</th><th>来源</th><th>实体</th><th>事件</th><th>阶段</th><th>操作者</th></tr></thead><tbody>${(control.audit?.items || []).map((item) => `<tr><td>${escapeHtml(shortDateTime(item.at))}</td><td>${escapeHtml(item.source)}</td><td><code>${escapeHtml(item.entityId)}</code></td><td>${escapeHtml(item.type)}</td><td>${escapeHtml(item.stage || "-")}</td><td>${escapeHtml(item.actor)}</td></tr>`).join("") || `<tr><td colspan="6">暂无审计事件</td></tr>`}</tbody></table></div>
+      </section>
+    </div>`;
+}
+
+function renderProductionOverview() {
+  const control = state.controlPlane;
+  if (!control) return emptyState("server-off", "生产状态不可用", "只读控制面尚未返回有效快照");
+  const latestTasks = [...(state.operationTasks || [])].sort((left, right) => Date.parse(right.updatedAt || 0) - Date.parse(left.updatedAt || 0)).slice(0, 8);
+  return `
+    <div class="view-stack">
+      <div class="section-header"><div><h2>采集运营</h2><p>首页仅保留历史与摘要；生产运行状态统一进入生产指挥中心。</p></div><button class="button" data-jump="operations" type="button"><i data-lucide="gauge"></i>生产指挥中心</button></div>
+      <section class="kpi-grid" aria-label="生产摘要">
+        ${kpi("list-tree", "历史采集任务", number(state.operationTasks.length), "不在首页创建或恢复任务")}
+        ${kpi("rows-3", "联系人队列", number(control.queues?.total), `${number(control.queues?.counts?.completed)} 已完成`) }
+        ${kpi("workflow", "Pipeline jobs", number(control.pipeline?.total), `${number(control.pipeline?.claimable)} 可领取`) }
+        ${kpi("send", "今日发送", number(control.delivery?.used), `政策上限 ${number(control.delivery?.policyDailyLimit)} · ${control.delivery?.mode || "unknown"}`) }
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div><h3>历史 Managed Collection</h3><span class="panel-caption">旧 HSCode、Keyword 与国家+业务 Discovery 仅作为历史记录展示</span></div>${controlStatusBadge(control.overall?.state)}</div>
+        <div class="table-shell"><table><thead><tr><th>更新时间</th><th>模式</th><th>目标</th><th>状态</th><th>Checkpoint</th></tr></thead><tbody>${latestTasks.map((task) => `<tr><td>${escapeHtml(shortDateTime(task.updatedAt))}</td><td>${escapeHtml(task.collectionMode || "-")}</td><td>${escapeHtml(task.collectionMode === "country_business" ? `${task.country || ""} ${(task.businessKeywords || []).join(", ")}` : task.collectionMode === "keyword" ? task.keyword : task.hsCode)}</td><td>${badge(task.status)}</td><td>${escapeHtml(task.checkpoint?.note || `page ${task.checkpoint?.page || 0}`)}</td></tr>`).join("") || `<tr><td colspan="5">暂无历史任务</td></tr>`}</tbody></table></div>
       </section>
     </div>`;
 }
@@ -1186,12 +1338,12 @@ function render() {
   title.textContent = meta[1];
   document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === state.view));
   const renderer = {
-    overview: renderOverview,
+    overview: renderProductionOverview,
     foundation: renderFoundation,
     workflow: renderWorkflow,
     buyers: renderBuyers,
     contacts: renderContacts,
-    operations: renderOperations,
+    operations: renderProductionCommandCenter,
     campaigns: renderCampaigns,
     drafts: renderDrafts,
     mailbox: renderMailbox,
@@ -1343,6 +1495,10 @@ async function loadLocalControls() {
   if (!state.contactQueues.some((item) => item.id === state.selectedQueueId)) {
     state.selectedQueueId = state.contactQueues[0]?.id || null;
   }
+}
+
+async function loadControlPlane() {
+  state.controlPlane = await api("/api/control-plane/status");
 }
 
 async function validateContactEmail(email) {
@@ -2273,7 +2429,7 @@ async function switchView(view) {
   setMobileNavOpen(false);
   if (view === "buyers") await loadBuyers();
   if (view === "contacts") await loadContacts();
-  if (view === "operations") await loadLocalControls();
+  if (view === "operations") await loadControlPlane();
   if (view === "campaigns") await loadCampaigns();
   if (view === "drafts") await loadDrafts();
   if (view === "mailbox") await loadMailbox();
@@ -2299,7 +2455,12 @@ addEventListener("resize", () => setMobileNavOpen(false));
 setMobileNavOpen(false);
 document.getElementById("refreshButton").addEventListener("click", async () => {
   setLoading();
-  try { await loadBase(); render(); toast("数据已刷新"); } catch (error) { main.innerHTML = emptyState("server-off", "无法连接本地服务", error.message); refreshIcons(); }
+  try {
+    if (state.view === "operations") await loadControlPlane();
+    else await loadBase();
+    render();
+    toast("数据已刷新");
+  } catch (error) { main.innerHTML = emptyState("server-off", "无法连接本地服务", error.message); refreshIcons(); }
 });
 
 setLoading();
@@ -2325,3 +2486,10 @@ setInterval(async () => {
     overviewRefreshInFlight = false;
   }
 }, 30_000);
+
+let controlPlaneRefreshInFlight = false;
+setInterval(async () => {
+  if (document.hidden || state.view !== "operations" || controlPlaneRefreshInFlight) return;
+  controlPlaneRefreshInFlight = true;
+  try { await loadControlPlane(); render(); } catch {} finally { controlPlaneRefreshInFlight = false; }
+}, 15_000);

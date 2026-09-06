@@ -56,6 +56,7 @@ const emailTemplateLibraryPath = process.env.EMAIL_TEMPLATE_LIBRARY_PATH || path
 const emailAssetStorePath = process.env.EMAIL_ASSET_STORE_PATH || path.join(appDir, "data", "email-assets.json");
 const managedPlanPath = process.env.MANAGED_PLAN_PATH || path.join(workspaceDir, "plans", "managed-hscode-plan.json");
 const managedHistoryReportPath = process.env.MANAGED_HISTORY_REPORT_PATH || path.join(appDir, "data", "managed-history-report.json");
+const releaseMetadataPath = process.env.RELEASE_METADATA_PATH || path.join(workspaceDir, "deploy", "release.json");
 const sourcePath = process.env.SOURCE_PATH || path.join(
   workspaceDir,
   "采集输出",
@@ -98,6 +99,14 @@ const PIPELINE_STAGES = [
   "feedback",
 ];
 const PIPELINE_STATUSES = new Set(["queued", "running", "waiting_input", "batch_review", "circuit_open", "paused", "completed"]);
+const CONTROL_PLANE_DAILY_POLICY_LIMIT = 1000;
+const CONTROL_PLANE_UNITS = Object.freeze({
+  managedTimer: "dakings-managed-collection.timer",
+  managedService: "dakings-managed-collection.service",
+  pipelineTimer: "dakings-pipeline-worker.timer",
+  pipelineService: "dakings-pipeline-worker.service",
+});
+let controlPlaneProbeCache = { expiresAt: 0, value: null };
 
 const EMAIL_SCENARIOS = [
   {
@@ -885,6 +894,268 @@ async function lockManagedDailyCollection(reason, companyCount = 0) {
   };
   await writeJsonStore(runtimeStatePath, runtimeStateStore);
   return runtimeStateStore.managedDailyCycle;
+}
+
+function readOnlyProcess(command, args, timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const stdout = [];
+    const stderr = [];
+    let size = 0;
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      finish(new Error(`${path.basename(command)} probe timed out`));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > 64 * 1024) {
+        child.kill("SIGTERM");
+        return finish(new Error(`${path.basename(command)} probe output exceeded limit`));
+      }
+      stdout.push(chunk);
+    });
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.once("error", (error) => finish(error));
+    child.once("close", (code) => finish(
+      code === 0 ? null : new Error(Buffer.concat(stderr).toString("utf8").trim() || `${path.basename(command)} exited ${code}`),
+      Buffer.concat(stdout).toString("utf8"),
+    ));
+  });
+}
+
+function parseSystemdProperties(output) {
+  return Object.fromEntries(String(output || "").split(/\r?\n/).map((line) => {
+    const index = line.indexOf("=");
+    return index > 0 ? [line.slice(0, index), line.slice(index + 1)] : null;
+  }).filter(Boolean));
+}
+
+async function controlPlaneRuntimeProbes() {
+  if (controlPlaneProbeCache.value && Date.now() < controlPlaneProbeCache.expiresAt) return controlPlaneProbeCache.value;
+  const properties = ["Id", "ActiveState", "SubState", "UnitFileState", "LastTriggerUSec", "NextElapseUSecRealtime"];
+  const units = await Promise.allSettled(Object.entries(CONTROL_PLANE_UNITS).map(async ([key, unit]) => {
+    const output = await readOnlyProcess("/usr/bin/systemctl", ["show", unit, "--no-pager", ...properties.map((item) => `--property=${item}`)]);
+    const value = parseSystemdProperties(output);
+    return [key, {
+      unit,
+      activeState: value.ActiveState || "unknown",
+      subState: value.SubState || "unknown",
+      unitFileState: value.UnitFileState || "unknown",
+      lastTriggerAt: value.LastTriggerUSec || null,
+      nextTriggerAt: value.NextElapseUSecRealtime || null,
+    }];
+  }));
+  const warnings = [];
+  const systemd = {};
+  units.forEach((result, index) => {
+    const key = Object.keys(CONTROL_PLANE_UNITS)[index];
+    if (result.status === "fulfilled") systemd[result.value[0]] = result.value[1];
+    else {
+      systemd[key] = { unit: CONTROL_PLANE_UNITS[key], activeState: "unknown", subState: "unknown", unitFileState: "unknown", lastTriggerAt: null, nextTriggerAt: null };
+      warnings.push(`systemd_probe_failed:${key}`);
+    }
+  });
+  let smtpConnections = null;
+  try {
+    const sockets = await readOnlyProcess("/usr/sbin/ss", ["-Htan", "state", "established"]);
+    smtpConnections = sockets.split(/\r?\n/).filter((line) => /:(?:25|465|587)\s/.test(line)).length;
+  } catch {
+    warnings.push("smtp_socket_probe_failed");
+  }
+  const value = { systemd, smtpConnections, warnings };
+  controlPlaneProbeCache = { value, expiresAt: Date.now() + 5000 };
+  return value;
+}
+
+async function controlPlaneRelease() {
+  const value = JSON.parse(await fs.readFile(releaseMetadataPath, "utf8"));
+  if (value?.schemaVersion !== 1 || !/^[a-f0-9]{40}$/i.test(String(value.commit || ""))) {
+    throw new Error("invalid release metadata");
+  }
+  return {
+    commit: String(value.commit).toLowerCase(),
+    shortCommit: String(value.commit).slice(0, 12).toLowerCase(),
+    branch: String(value.branch || "").slice(0, 120),
+    recoveryPhase: String(value.recoveryPhase || "").slice(0, 40),
+    recoveryStatus: String(value.recoveryStatus || "").slice(0, 80),
+    deployedAt: value.deployedAt || null,
+  };
+}
+
+function controlPlaneQueueSummary(now) {
+  const counts = { pending: 0, leased: 0, completed: 0, failed: 0, skipped: 0 };
+  const queueStates = {};
+  let expiredLeasesObserved = 0;
+  for (const queue of contactCollectionStore.queues || []) {
+    queueStates[queue.status || "unknown"] = Number(queueStates[queue.status || "unknown"] || 0) + 1;
+    for (const item of queue.items || []) {
+      const status = counts[item.status] === undefined ? "unknown" : item.status;
+      counts[status] = Number(counts[status] || 0) + 1;
+    }
+    if (queue.activeBatchId && queue.leaseExpiresAt && Date.parse(queue.leaseExpiresAt) <= now.getTime()) expiredLeasesObserved += 1;
+  }
+  return {
+    total: (contactCollectionStore.queues || []).length,
+    queueStates,
+    counts,
+    activeLeases: counts.leased,
+    expiredLeasesObserved,
+  };
+}
+
+function controlPlaneTaskSummary() {
+  const counts = {};
+  const safetyStates = {};
+  for (const task of operationsStore.tasks || []) {
+    counts[task.status || "unknown"] = Number(counts[task.status || "unknown"] || 0) + 1;
+    safetyStates[task.safetyState || "unknown"] = Number(safetyStates[task.safetyState || "unknown"] || 0) + 1;
+  }
+  return { total: (operationsStore.tasks || []).length, counts, safetyStates };
+}
+
+function controlPlanePipelineSummary() {
+  const jobs = pipelineStore.jobs || [];
+  const counts = Object.fromEntries([...PIPELINE_STATUSES].map((status) => [status, 0]));
+  const stageCounts = {};
+  const flow = Object.fromEntries(["discovery", "contact", "draft", "approval", "delivery"].map((stage) => [stage, 0]));
+  const flowStage = (stage) => {
+    if (stage === "discovery") return "discovery";
+    if (["trade_normalization", "buyer_matching", "contact_enrichment", "validation"].includes(stage)) return "contact";
+    if (stage === "drafting") return "draft";
+    if (stage === "approval") return "approval";
+    return "delivery";
+  };
+  for (const job of jobs) {
+    counts[job.status || "unknown"] = Number(counts[job.status || "unknown"] || 0) + 1;
+    stageCounts[job.currentStage || "unknown"] = Number(stageCounts[job.currentStage || "unknown"] || 0) + 1;
+    flow[flowStage(job.currentStage)] += 1;
+  }
+  return {
+    total: jobs.length,
+    counts,
+    stageCounts,
+    flow,
+    claimable: counts.queued,
+    activeLeases: jobs.filter((job) => job.status === "running" && job.leaseExpiresAt).length,
+  };
+}
+
+function controlPlaneOutboxSummary() {
+  const statuses = ["pending", "sending", "accepted", "failed", "uncertain", "cancelled"];
+  const entries = outboxStore.entries || [];
+  const counts = Object.fromEntries(statuses.map((status) => [status, entries.filter((entry) => entry.status === status).length]));
+  return { total: entries.length, counts, active: counts.pending + counts.sending + counts.uncertain };
+}
+
+function controlPlaneAuditTimeline(limit) {
+  const items = [];
+  const cleanActor = (value) => {
+    const actor = String(value || "").trim();
+    if (!actor) return "system";
+    return actor.includes("@") ? `actor:${publicFingerprint(emailFingerprint(actor))}` : actor.slice(0, 80);
+  };
+  const add = (source, entityId, entries) => {
+    for (const entry of entries || []) {
+      const at = entry.at || entry.recordedAt || entry.recoveredAt || entry.createdAt;
+      if (!at || !Number.isFinite(Date.parse(at))) continue;
+      items.push({
+        at,
+        source,
+        entityId: String(entityId || "").slice(0, 120),
+        type: String(entry.type || entry.status || "state_changed").slice(0, 120),
+        stage: String(entry.stage || "").slice(0, 80),
+        actor: cleanActor(entry.actor || entry.owner || entry.reviewer || entry.updatedBy),
+      });
+    }
+  };
+  for (const task of operationsStore.tasks || []) add("collection", task.id, task.audit);
+  for (const queue of contactCollectionStore.queues || []) add("queue", queue.id, queue.audit);
+  for (const job of pipelineStore.jobs || []) add("pipeline", job.id, job.audit);
+  for (const entry of outboxStore.entries || []) add("outbox", entry.id, entry.events);
+  add("delivery", "delivery-circuit", runtimeStateStore.deliveryCircuitHistory);
+  items.sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
+  return { items: items.slice(0, limit), returned: Math.min(items.length, limit), truncated: items.length > limit };
+}
+
+async function controlPlaneStatus(auditLimit = 50) {
+  const now = new Date();
+  const warnings = [];
+  const [releaseResult, probeResult] = await Promise.allSettled([controlPlaneRelease(), controlPlaneRuntimeProbes()]);
+  const baseline = releaseResult.status === "fulfilled" ? releaseResult.value : null;
+  if (!baseline) warnings.push("release_metadata_unavailable");
+  const probes = probeResult.status === "fulfilled"
+    ? probeResult.value
+    : { systemd: {}, smtpConnections: null, warnings: ["runtime_probe_failed"] };
+  warnings.push(...probes.warnings);
+  const queues = controlPlaneQueueSummary(now);
+  const pipeline = controlPlanePipelineSummary();
+  const outbox = controlPlaneOutboxSummary();
+  const cycle = managedDailyCycleState(now);
+  const daily = dailyDeliveryUsage(now);
+  const capacity = calculateDeliveryCapacity(now);
+  const mode = runtimeStateStore.deliveryAutomation.mode;
+  if (deliveryConfig.dailyLimit !== CONTROL_PLANE_DAILY_POLICY_LIMIT) warnings.push("delivery_limit_config_mismatch");
+  if (cycle.collectionLocked) warnings.push("collection_locked");
+  if (queues.activeLeases) warnings.push("active_queue_leases");
+  if (pipeline.counts.running) warnings.push("pipeline_running");
+  if (outbox.active) warnings.push("active_outbox");
+  if (mode === "manual" && Number(probes.smtpConnections || 0) > 0) warnings.push("smtp_connection_while_manual");
+  const managedTimer = probes.systemd.managedTimer?.activeState || "unknown";
+  const pipelineTimer = probes.systemd.pipelineTimer?.activeState || "unknown";
+  const unsafe = warnings.some((item) => ["active_queue_leases", "pipeline_running", "active_outbox", "smtp_connection_while_manual"].includes(item));
+  const degraded = !baseline || warnings.some((item) => item.includes("probe_failed"));
+  const state = unsafe ? "blocked" : degraded ? "degraded" : mode === "manual" || managedTimer !== "active" || pipelineTimer !== "active" ? "safe_hold" : "healthy";
+  return {
+    schemaVersion: 1,
+    generatedAt: now.toISOString(),
+    readOnly: true,
+    overall: { state, warnings: [...new Set(warnings)] },
+    baseline,
+    delivery: {
+      mode,
+      policyDailyLimit: CONTROL_PLANE_DAILY_POLICY_LIMIT,
+      configuredDailyLimit: deliveryConfig.dailyLimit,
+      effectiveDailyLimit: capacity.globalLimit,
+      used: daily.used,
+      remaining: Math.max(CONTROL_PLANE_DAILY_POLICY_LIMIT - daily.used, 0),
+      effectiveRemaining: capacity.globalRemaining,
+      automaticSendingEnabled: mode === "auto" && sendingEnabled() && !runtimeStateStore.deliveryCircuit.open,
+      circuitOpen: runtimeStateStore.deliveryCircuit.open,
+    },
+    schedulers: {
+      managed: { timer: probes.systemd.managedTimer || null, service: probes.systemd.managedService || null, persistent: true },
+      pipeline: { timer: probes.systemd.pipelineTimer || null, service: probes.systemd.pipelineService || null, persistent: true },
+    },
+    collection: {
+      engine: cycle.collectionLocked ? "locked" : probes.systemd.managedService?.activeState === "active" ? "running" : probes.systemd.managedTimer?.activeState === "active" ? "scheduled" : "stopped",
+      cycle: { businessDate: cycle.businessDate, locked: cycle.collectionLocked, reason: cycle.reason, productionSends: cycle.productionSends },
+      tasks: controlPlaneTaskSummary(),
+    },
+    queues,
+    pipeline,
+    outbox,
+    smtp: {
+      configured: isSmtpConfigured(),
+      sendingEnabled: sendingEnabled(),
+      automaticSendingEnabled: mode === "auto" && sendingEnabled() && !runtimeStateStore.deliveryCircuit.open,
+      establishedConnections: probes.smtpConnections,
+      probe: probes.smtpConnections === null ? "unknown" : "ok",
+    },
+    audit: controlPlaneAuditTimeline(auditLimit),
+    probes: {
+      releaseMetadata: baseline ? "ok" : "error",
+      systemd: probes.warnings.some((item) => item.startsWith("systemd_probe_failed")) ? "error" : "ok",
+      smtpSockets: probes.smtpConnections === null ? "error" : "ok",
+    },
+  };
 }
 
 runtimeStateStore.managedDailyCycle = managedDailyCycleState();
@@ -3545,6 +3816,10 @@ async function apiHandler(req, res, url, model) {
 
 async function apiHandlerUnlocked(req, res, url, model) {
   const pathname = url.pathname;
+  if (req.method === "GET" && pathname === "/api/control-plane/status") {
+    const auditLimit = boundedInteger(url.searchParams.get("auditLimit"), 50, 0, 200);
+    return json(res, 200, await controlPlaneStatus(auditLimit));
+  }
   if (req.method === "GET" && pathname === "/api/company-qualification") {
     const totals = { totalCompanies: 0, passed: 0, rejected: 0, reasons: {}, companies: [] };
     for (const job of (pipelineStore.jobs || []).slice(0, 200)) {

@@ -14,6 +14,7 @@ const managedRunner = fs.readFileSync("tools/run-managed-hscode-plan.ps1", "utf8
 const managedNodeRunner = fs.readFileSync("tools/run-managed-hscode-plan.mjs", "utf8");
 const contactSupervisor = fs.readFileSync("tools/netease-contact-supervisor.mjs", "utf8");
 const handoffPipeline = fs.readFileSync("tools/handoff-managed-pipeline.py", "utf8");
+const release = JSON.parse(fs.readFileSync("deploy/release.json", "utf8"));
 
 for (const required of [
   "app/public/assets/email",
@@ -133,5 +134,22 @@ assert.match(frontend, /activeQueue\.counts\?\.processed/);
 assert.match(frontend, /30_000/);
 assert.match(index, /data-view="drafts"/);
 assert.match(frontend, /集中批次核验/);
+assert.equal(release.schemaVersion, 1);
+assert.match(release.commit, /^[a-f0-9]{40}$/);
+assert.equal(release.recoveryPhase, "8.33");
+assert.match(server, /\/api\/control-plane\/status/);
+assert.match(server, /function controlPlaneStatus\(/);
+assert.match(server, /function controlPlaneQueueSummary\(/);
+assert.match(server, /delivery_limit_config_mismatch/);
+assert.match(server, /readOnlyProcess\("\/usr\/sbin\/ss"/, "SMTP probe must use the production ss path");
+assert.match(frontend, /function renderProductionCommandCenter\(/);
+assert.match(frontend, /operations: renderProductionCommandCenter/);
+assert.match(frontend, /overview: renderProductionOverview/);
+assert.match(index, /生产指挥中心/);
+const commandCenter = frontend.slice(frontend.indexOf("function renderProductionCommandCenter("), frontend.indexOf("function renderProductionOverview("));
+assert.doesNotMatch(commandCenter, /method:\s*"(?:POST|PUT|PATCH|DELETE)"/);
+assert.doesNotMatch(commandCenter, /id="(?:centralBatchSend|claimCollection|resume|recover|unlock)/);
+const productionOverview = frontend.slice(frontend.indexOf("function renderProductionOverview("), frontend.indexOf("function budgetMeter("));
+assert.doesNotMatch(productionOverview, /overviewManagedPlanForm|切换并启动托管采集/);
 
 console.log("deployment contract unit passed");
