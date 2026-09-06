@@ -136,7 +136,7 @@ assert.match(index, /data-view="drafts"/);
 assert.match(frontend, /集中批次核验/);
 assert.equal(release.schemaVersion, 1);
 assert.match(release.commit, /^[a-f0-9]{40}$/);
-assert.equal(release.recoveryPhase, "8.33");
+assert.equal(release.recoveryPhase, "10.2");
 assert.match(server, /\/api\/control-plane\/status/);
 assert.match(server, /function controlPlaneStatus\(/);
 assert.match(server, /function controlPlaneQueueSummary\(/);
