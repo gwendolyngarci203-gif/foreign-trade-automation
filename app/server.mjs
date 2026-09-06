@@ -3200,7 +3200,7 @@ async function sendSmtpMessage(message, smtpConfig = deliveryConfig, buildMessag
 
 function outboxPublicSummary() {
   const entries = outboxStore.entries || [];
-  const statuses = ["pending", "sending", "accepted", "failed", "uncertain"];
+  const statuses = ["pending", "sending", "accepted", "failed", "uncertain", "cancelled"];
   return {
     counts: Object.fromEntries(statuses.map((status) => [status, entries.filter((entry) => entry.status === status).length])),
     items: entries.slice(-200).reverse().map((entry) => ({
@@ -3341,7 +3341,10 @@ async function transitionOutbox(entry, status, details = {}) {
   if (status === "sending") entry.attempts = Number(entry.attempts || 0) + 1;
   if (details.providerResponse !== undefined) entry.providerResponse = clipText(details.providerResponse, 500);
   if (details.lastError !== undefined) entry.lastError = clipText(details.lastError, 500);
-  entry.events = [...(entry.events || []), { at: now, status, type: details.type || `delivery_${status}` }].slice(-100);
+  const event = { at: now, status, type: details.type || `delivery_${status}` };
+  if (details.actor !== undefined) event.actor = clipText(details.actor, 120);
+  if (details.reason !== undefined) event.reason = clipText(details.reason, 500);
+  entry.events = [...(entry.events || []), event].slice(-100);
   await writeJsonStore(outboxPath, outboxStore);
   return entry;
 }
@@ -3521,6 +3524,7 @@ async function apiHandler(req, res, url, model) {
     /^\/api\/campaigns(?:\/|$)/.test(pathname)
     || /^\/api\/pipeline\/jobs\/[^/]+\/send$/.test(pathname)
     || pathname === "/api/pipeline/central-batch/send"
+    || /^\/api\/outbox\/[^/]+\/cancel$/.test(pathname)
     || pathname === "/api/ops/intervention-alert"
   );
   const sendMatch = req.method === "POST" ? pathname.match(/^\/api\/campaigns\/([^/]+)\/send$/) : null;
@@ -4655,6 +4659,40 @@ async function apiHandlerUnlocked(req, res, url, model) {
     } finally {
       mailboxRepliesInFlight.delete(source.id);
     }
+  }
+  const outboxCancelMatch = pathname.match(/^\/api\/outbox\/([^/]+)\/cancel$/);
+  if (outboxCancelMatch && req.method === "POST") {
+    const entry = (outboxStore.entries || []).find((item) => item.id === outboxCancelMatch[1]);
+    if (!entry) return json(res, 404, { error: "发件箱记录不存在" });
+    if (entry.status !== "pending") return json(res, 409, { error: "只有pending记录可以取消" });
+    const input = await parseBody(req);
+    if (input.confirm !== `CANCEL OUTBOX ${entry.id}`) return json(res, 428, { error: `需要输入确认短语：CANCEL OUTBOX ${entry.id}` });
+    const actor = clipText(String(input.operator || "").trim(), 120);
+    const reason = clipText(String(input.reason || "").trim(), 500);
+    if (!actor || !reason) return json(res, 422, { error: "取消必须记录操作者和原因" });
+    await transitionOutbox(entry, "cancelled", { type: "manual_outbox_cancelled", actor, reason });
+    const job = (pipelineStore.jobs || []).find((item) => item.id === entry.campaignId);
+    if (job?.currentStage === "sending" && ["waiting_input", "paused"].includes(job.status)) {
+      job.status = "paused";
+      job.leaseOwner = "";
+      job.leaseExpiresAt = null;
+      job.requiredInput = `发件箱记录已取消：${reason}`.slice(0, 500);
+      job.stages.sending = { ...(job.stages.sending || {}), status: "paused", updatedAt: entry.updatedAt };
+      job.updatedAt = entry.updatedAt;
+      job.audit = [...(job.audit || []), { at: entry.updatedAt, type: "pipeline_outbox_cancelled", outboxId: entry.id, actor, reason }].slice(-1000);
+      await writeJsonStore(pipelinePath, pipelineStore);
+    }
+    return json(res, 200, {
+      outbox: {
+        id: entry.id,
+        campaignId: entry.campaignId,
+        status: entry.status,
+        attempts: entry.attempts,
+        events: (entry.events || []).slice(-20),
+      },
+      job: job ? { id: job.id, status: job.status, currentStage: job.currentStage } : null,
+      smtp: false,
+    });
   }
   const outboxMatch = pathname.match(/^\/api\/outbox\/([^/]+)\/resolve$/);
   if (outboxMatch && req.method === "POST") {

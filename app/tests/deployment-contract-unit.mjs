@@ -56,6 +56,8 @@ assert.doesNotMatch(managedNodeRunner, /candidate\.counts\?\.remaining \|\| 0\) 
 assert.match(managedNodeRunner, /LOCK MANAGED COLLECTION/);
 assert.match(managedNodeRunner, /刷新服务器登录页/);
 assert.match(contactSupervisor, /process\.kill\(ownerPid, 0\)/);
+assert.match(contactSupervisor, /MANAGED_RUN_LIMIT/);
+assert.match(contactSupervisor, /Math\.min\(managedRunLimit, remaining\)/);
 assert.match(handoffPipeline, /at_review = job\.get\("currentStage"\) == "approval"/);
 assert.match(handoffPipeline, /mode\": \"central_batch\"/);
 

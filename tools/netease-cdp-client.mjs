@@ -969,8 +969,9 @@ if (command === "inspect") {
   })()`);
   await new Promise((resolve) => setTimeout(resolve, 400));
   await evaluate(target, `(() => {
-    const exact = [...document.querySelectorAll('.customsSearch-module--precise--si5IV input[type="checkbox"]')]
-      .find(el => (el.offsetWidth || el.offsetHeight));
+    const exact = [...document.querySelectorAll('input[type="checkbox"]')]
+      .find(el => (el.offsetWidth || el.offsetHeight)
+        && ((el.closest('label')?.innerText || el.parentElement?.parentElement?.innerText || '').includes('精确')));
     if (!exact) throw new Error("Exact checkbox missing");
     const input = [...document.querySelectorAll("input")]
       .find(el => el.placeholder === "请输入公司名称" && (el.offsetWidth || el.offsetHeight));
@@ -1010,8 +1011,9 @@ if (command === "inspect") {
       const text = document.body?.innerText || "";
       const input = [...document.querySelectorAll("input")]
         .find(el => el.placeholder === "请输入公司名称" && (el.offsetWidth || el.offsetHeight));
-      const exact = [...document.querySelectorAll('.customsSearch-module--precise--si5IV input[type="checkbox"]')]
-        .find(el => (el.offsetWidth || el.offsetHeight));
+      const exact = [...document.querySelectorAll('input[type="checkbox"]')]
+        .find(el => (el.offsetWidth || el.offsetHeight)
+          && ((el.closest('label')?.innerText || el.parentElement?.parentElement?.innerText || '').includes('精确')));
       const countMatch = text.match(/为您找到\\s*([0-9+]+)\\s*个结果/);
       const requestCount = performance.getEntriesByType("resource")
         .filter(entry => entry.initiatorType === "fetch" || entry.initiatorType === "xmlhttprequest").length;
@@ -1062,8 +1064,9 @@ if (command === "inspect") {
     const text = document.body?.innerText || "";
     const input = [...document.querySelectorAll("input")]
       .find(el => el.placeholder === "请输入公司名称" && (el.offsetWidth || el.offsetHeight));
-    const exact = [...document.querySelectorAll('.customsSearch-module--precise--si5IV input[type="checkbox"]')]
-      .find(el => (el.offsetWidth || el.offsetHeight));
+    const exact = [...document.querySelectorAll('input[type="checkbox"]')]
+      .find(el => (el.offsetWidth || el.offsetHeight)
+        && ((el.closest('label')?.innerText || el.parentElement?.parentElement?.innerText || '').includes('精确')));
     const countMatch = text.match(/为您找到\\s*([0-9+]+)\\s*个结果/);
     const tables = [...document.querySelectorAll("table")];
     const resultTable = tables.find(table => table.querySelector('tr[data-row-key]')
@@ -1206,17 +1209,28 @@ if (command === "inspect") {
               source: "NetEase global search visible company detail",
             },
             contacts: rows.map(row => {
-              const name = row.querySelector('[class*="global-search-table-name"] [class*="name"]')?.innerText?.split("\\n")[0]?.trim()
+              const cells = [...(row.cells || [])];
+              const legacyName = row.querySelector('[class*="global-search-table-name"] [class*="name"]')?.innerText?.split("\\n")[0]?.trim()
                 || row.querySelector('[class*="global-search-table-name"]')?.innerText?.split("\\n")[0]?.trim() || "";
-              const titleRaw = row.querySelector('[class*="global-search-table-sub-name"]')?.innerText?.trim() || "";
-              const titleParts = titleRaw.split("\\n").map(value => value.trim()).filter(Boolean);
-              const title = [...new Set(titleParts)].join("; ");
-              const email = row.querySelector('[class*="email-text"]')?.innerText?.trim() || "";
-              const phoneNode = row.querySelector('[class*="iconPhone"]')?.parentElement;
-              const phone = phoneNode?.innerText?.trim() || "";
-              const linkedin = [...row.querySelectorAll('a[href]')].find(a => /linkedin\\.com/i.test(a.href))?.href || "";
-              const source = [...new Set((row.cells?.[3]?.innerText || "").split("\\n").map(value => value.trim()).filter(Boolean))].join("; ");
-              return { name, title, email, phone, linkedin, source: "NetEase visible contact row; " + (source || "public visible") + "; unverified" };
+              const legacyTitleRaw = row.querySelector('[class*="global-search-table-sub-name"]')?.innerText?.trim() || "";
+              const legacyTitle = [...new Set(legacyTitleRaw.split("\\n").map(value => value.trim()).filter(Boolean))].join("; ");
+              const legacyEmail = row.querySelector('[class*="email-text"]')?.innerText?.trim() || "";
+              const legacyPhoneNode = row.querySelector('[class*="iconPhone"]')?.parentElement;
+              const legacyPhone = legacyPhoneNode?.innerText?.trim() || "";
+              const legacyLinkedin = [...row.querySelectorAll('a[href]')].find(a => /linkedin\\.com/i.test(a.href))?.href || "";
+              const fallbackPerson = (cells[1]?.innerText || "").split("\\n").map(value => value.trim()).filter(Boolean);
+              const fallbackContactText = cells[2]?.innerText || "";
+              const fallbackEmail = fallbackContactText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i)?.[0] || "";
+              const fallbackPhone = fallbackContactText.match(/(?:\\+?\\d[\\d ()-]{6,})/)?.[0]?.trim() || "";
+              const fallbackLinkedin = [...(cells[2]?.querySelectorAll('a[href]') || [])].find(a => /linkedin\\.com/i.test(a.href))?.href || "";
+              const fallbackSource = [...new Set((cells[3]?.innerText || "").split("\\n").map(value => value.trim()).filter(Boolean))].join("; ");
+              const mode = legacyName || legacyTitle || legacyEmail || legacyPhone || legacyLinkedin ? "legacy" : "fallback";
+              const name = legacyName || fallbackPerson[0] || "";
+              const title = legacyTitle || [...new Set(fallbackPerson.slice(1))].join("; ");
+              const email = legacyEmail || fallbackEmail;
+              const phone = legacyPhone || fallbackPhone;
+              const linkedin = legacyLinkedin || fallbackLinkedin;
+              return { name, title, email, phone, linkedin, source: "NetEase visible contact row; " + (fallbackSource || "public visible") + "; unverified", parserDebug: { mode, cellCount: cells.length, mapping: { name: Boolean(name), title: Boolean(title), email: Boolean(email), phone: Boolean(phone), linkedin: Boolean(linkedin), source: Boolean(fallbackSource) } } };
             }),
             drawerText: drawerText.slice(0, 10000),
             safety: {

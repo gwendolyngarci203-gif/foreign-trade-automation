@@ -15,6 +15,10 @@ const operationPage = Math.max(0, Number.parseInt(process.env.OPERATION_PAGE || 
 const minimumCooldownMinutes = Math.max(15, Number.parseInt(process.env.COLLECTION_MIN_COOLDOWN_MINUTES || "30", 10) || 30);
 const maximumCooldownMinutes = Math.max(minimumCooldownMinutes, Number.parseInt(process.env.COLLECTION_MAX_COOLDOWN_MINUTES || "180", 10) || 180);
 const minimumBatchGapMinutes = Math.max(5, Number.parseInt(process.env.COLLECTION_MIN_BATCH_GAP_MINUTES || "10", 10) || 10);
+const requestedRunLimit = Number.parseInt(process.env.MANAGED_RUN_LIMIT || "", 10);
+const managedRunLimit = Number.isInteger(requestedRunLimit)
+  ? Math.max(1, Math.min(requestedRunLimit, 20))
+  : 20;
 const cooldownSteps = [30, 45, 60, 90, 120, 180]
   .map((minutes) => Math.min(maximumCooldownMinutes, Math.max(minimumCooldownMinutes, minutes)))
   .filter((minutes, index, values) => index === 0 || minutes !== values[index - 1]);
@@ -145,8 +149,8 @@ async function rebuildWorkbook() {
 }
 
 async function managedBudget(queue) {
-  if (!operationTaskId) return 20;
-  return Math.max(0, Math.min(20, Number(queue.counts?.remaining || 0)));
+  const remaining = operationTaskId ? Number(queue.counts?.remaining || 0) : 20;
+  return Math.max(0, Math.min(managedRunLimit, remaining));
 }
 
 async function recordManagedCompletions(queue) {
