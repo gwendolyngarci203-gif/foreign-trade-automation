@@ -1,0 +1,2864 @@
+import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
+import crypto from "node:crypto";
+import net from "node:net";
+import tls from "node:tls";
+import dns from "node:dns/promises";
+import { fileURLToPath } from "node:url";
+import {
+  COLLECTION_SIGNALS,
+  SEVERE_PLATFORM_SIGNALS,
+  STRUCTURE_SIGNALS,
+  claimBatch,
+  collectionBoundaryReport,
+  collectionQueueView,
+  completeBatch,
+  createOrSyncQueue,
+  normalizeCompanyName,
+  releaseExpiredLease,
+  setQueueState,
+} from "./contact-collection.mjs";
+
+const appDir = path.dirname(fileURLToPath(import.meta.url));
+const workspaceDir = path.resolve(appDir, "..");
+const publicDir = path.join(appDir, "public");
+const campaignPath = process.env.CAMPAIGN_PATH || path.join(appDir, "data", "campaigns.json");
+const validationPath = process.env.VALIDATION_PATH || path.join(appDir, "data", "contact-validation.json");
+const suppressionPath = process.env.SUPPRESSION_PATH || path.join(appDir, "data", "suppressions.json");
+const operationsPath = process.env.OPERATIONS_PATH || path.join(appDir, "data", "operations.json");
+const contactCollectionPath = process.env.CONTACT_COLLECTION_PATH || path.join(appDir, "data", "contact-collection.json");
+const contactCollectionArtifactDir = process.env.CONTACT_COLLECTION_ARTIFACT_DIR || path.join(workspaceDir, "outputs", "contact-collection-batches");
+const pipelinePath = process.env.PIPELINE_PATH || path.join(appDir, "data", "pipeline.json");
+const outboxPath = process.env.OUTBOX_PATH || path.join(appDir, "data", "outbox.json");
+const runtimeStatePath = process.env.RUNTIME_STATE_PATH || path.join(appDir, "data", "runtime-state.json");
+const localBackupDir = process.env.LOCAL_BACKUP_DIR || path.join(appDir, "data", "backups");
+const emailTemplateLibraryPath = process.env.EMAIL_TEMPLATE_LIBRARY_PATH || path.join(appDir, "data", "email-template-library.json");
+const sourcePath = process.env.SOURCE_PATH || path.join(
+  workspaceDir,
+  "采集输出",
+  "深圳市金豪彩色印刷有限公司_网易前20买家联系方式_2026-07-19.json",
+);
+
+const port = Number(process.env.PORT || 4173);
+const host = process.env.HOST || "127.0.0.1";
+const MAX_BODY_BYTES = 1024 * 1024;
+const OPENAI_BASE_URL = (String(process.env.OPENAI_BASE_URL || "").trim() || "https://api.openai.com/v1").replace(/\/+$/, "");
+const OPENAI_MODEL = String(process.env.OPENAI_MODEL || "").trim() || "gpt-5.6-sol";
+const FEEDBACK_WEBHOOK_SECRET = String(process.env.FEEDBACK_WEBHOOK_SECRET || "").trim();
+const MAX_AI_CONTEXT_CHARS = 4000;
+const AI_MIN_INTERVAL_MS = boundedInteger(process.env.AI_MIN_INTERVAL_MS, 1500, 250, 60000);
+const EMAIL_TEMPLATE_LIBRARY = JSON.parse(await fs.readFile(emailTemplateLibraryPath, "utf8"));
+let lastAiRequestAt = 0;
+let aiRequestInFlight = false;
+let backupMergeInFlight = false;
+let activeStoreMutations = 0;
+
+const PIPELINE_STAGES = [
+  "discovery",
+  "trade_normalization",
+  "buyer_matching",
+  "contact_enrichment",
+  "validation",
+  "drafting",
+  "approval",
+  "sending",
+  "feedback",
+];
+const PIPELINE_STATUSES = new Set(["queued", "running", "waiting_input", "circuit_open", "paused", "completed"]);
+
+const EMAIL_SCENARIOS = [
+  {
+    id: "first_touch",
+    name: "首次开发信",
+    goal: "Use one buyer-specific relevance sentence, introduce the matching print capability, and ask for one specification or RFQ.",
+    wordRange: [80, 130],
+    maxAssets: 1,
+    requiredFields: ["hsCode", "productFocus", "buyerEvidence"],
+  },
+  {
+    id: "factory_proof",
+    name: "工厂能力信",
+    goal: "Support a relevant production discussion with approved factory evidence and a practical project-level call to action.",
+    wordRange: [85, 140],
+    maxAssets: 1,
+    requiredFields: ["hsCode", "productFocus", "buyerEvidence"],
+  },
+  {
+    id: "exhibition_booth",
+    name: "展会展位邀请",
+    goal: "Invite the recipient to a verified booth with concise date, booth and venue details, then ask for a meeting time.",
+    wordRange: [70, 125],
+    maxAssets: 2,
+    requiredFields: ["hsCode", "productFocus", "buyerEvidence", "eventName", "eventDates", "eventBooth", "eventAddress"],
+  },
+  {
+    id: "exhibition_city_visit",
+    name: "展会当地拜访",
+    goal: "Offer either an exhibition meeting or a short company visit in the same city without creating pressure.",
+    wordRange: [75, 130],
+    maxAssets: 2,
+    requiredFields: ["hsCode", "productFocus", "buyerEvidence", "eventName", "eventDates", "meetingLocation"],
+  },
+  {
+    id: "exhibitor_meeting",
+    name: "对参展商约见",
+    goal: "Reference the recipient's verified exhibitor status and request a brief booth meeting around the matching product category.",
+    wordRange: [70, 120],
+    maxAssets: 2,
+    requiredFields: ["hsCode", "productFocus", "buyerEvidence", "eventName"],
+  },
+];
+
+const GUARDED_CLAIMS = [
+  { id: "experience_33_years", label: "33年印刷经验", text: "Dakings has more than 33 years of printing experience.", pattern: /33\s+years?/i },
+  { id: "named_client_references", label: "Walmart / National Geographic客户背书", text: "Dakings is an approved printing supplier for Walmart books and National Geographic publications.", pattern: /walmart|national geographic/i },
+  { id: "open_account_terms", label: "OA账期", text: "Open Account payment terms are approved for this specific prospect.", pattern: /open account|\bOA\b/i },
+  { id: "fifteen_day_lead_time", label: "15天交期", text: "A 15-day production lead time is verified for the relevant specification and quantity.", pattern: /15[-\s]?day/i },
+  { id: "factory_photos", label: "工厂照片可对外使用", text: "The selected factory photograph is approved for external outreach.", pattern: /factory (?:photo|picture|image)/i },
+  { id: "portfolio_images", label: "作品图可对外使用", text: "The selected portfolio images are approved for external outreach.", pattern: /portfolio (?:photo|picture|image)|recent printed project/i },
+];
+
+const EMAIL_ASSETS = [
+  { id: "children_books", label: "儿童书作品", url: "/assets/email/children-books.jpg", file: "assets/email/children-books.jpg", tags: ["4903000", "first_touch", "exhibition"], requiredClaim: "portfolio_images" },
+  { id: "colored_edge_books", label: "彩边书工艺", url: "/assets/email/colored-edge-books.jpg", file: "assets/email/colored-edge-books.jpg", tags: ["books", "finishing", "first_touch"], requiredClaim: "portfolio_images" },
+  { id: "factory_floor", label: "工厂与设备", url: "/assets/email/factory-floor.jpg", file: "assets/email/factory-floor.jpg", tags: ["factory_proof"], requiredClaim: "factory_photos" },
+  { id: "comic_art_books", label: "漫画与艺术书", url: "/assets/email/comic-art-books.jpg", file: "assets/email/comic-art-books.jpg", tags: ["comic", "art_book", "exhibition"], requiredClaim: "portfolio_images" },
+  { id: "tarot_packaging", label: "塔罗书卡套装", url: "/assets/email/tarot-packaging.jpg", file: "assets/email/tarot-packaging.jpg", tags: ["tarot", "packaging", "exhibition"], requiredClaim: "portfolio_images" },
+  { id: "cards_board_games", label: "卡牌与桌游", url: "/assets/email/cards-board-games.jpg", file: "assets/email/cards-board-games.jpg", tags: ["cards", "board_games", "exhibition"], requiredClaim: "portfolio_images" },
+  { id: "premium_books_set", label: "高端书籍套装", url: "/assets/email/premium-books-set.jpg", file: "assets/email/premium-books-set.jpg", tags: ["premium_books", "slipcase", "exhibition"], requiredClaim: "portfolio_images" },
+  { id: "games_packaging", label: "游戏与包装产品", url: "/assets/email/games-packaging.jpg", file: "assets/email/games-packaging.jpg", tags: ["games", "packaging", "exhibition"], requiredClaim: "portfolio_images" },
+  { id: "collectible_books", label: "收藏类书籍", url: "/assets/email/collectible-books.jpg", file: "assets/email/collectible-books.jpg", tags: ["collectible", "comic", "exhibition"], requiredClaim: "portfolio_images" },
+];
+
+const SCENARIO_BY_ID = new Map(EMAIL_SCENARIOS.map((item) => [item.id, item]));
+const CLAIM_BY_ID = new Map(GUARDED_CLAIMS.map((item) => [item.id, item]));
+const ASSET_BY_ID = new Map(EMAIL_ASSETS.map((item) => [item.id, item]));
+
+for (const scenario of EMAIL_SCENARIOS) {
+  if (!EMAIL_TEMPLATE_LIBRARY.scenarios?.[scenario.id]) {
+    throw new Error(`邮件模板库缺少场景：${scenario.id}`);
+  }
+}
+
+function envEnabled(value) {
+  return /^(1|true|yes)$/i.test(String(value || ""));
+}
+
+function boundedInteger(value, fallback, minimum, maximum) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? Math.min(Math.max(parsed, minimum), maximum) : fallback;
+}
+
+const deliveryConfig = {
+  enabled: envEnabled(process.env.EMAIL_SENDING_ENABLED),
+  allowUnverified: envEnabled(process.env.EMAIL_ALLOW_UNVERIFIED),
+  host: String(process.env.SMTP_HOST || "").trim(),
+  port: boundedInteger(process.env.SMTP_PORT, 465, 1, 65535),
+  secure: process.env.SMTP_SECURE === undefined ? true : envEnabled(process.env.SMTP_SECURE),
+  startTls: envEnabled(process.env.SMTP_STARTTLS),
+  rejectUnauthorized: process.env.SMTP_TLS_REJECT_UNAUTHORIZED === undefined
+    ? true
+    : envEnabled(process.env.SMTP_TLS_REJECT_UNAUTHORIZED),
+  allowInsecureAuth: envEnabled(process.env.SMTP_ALLOW_INSECURE_AUTH),
+  user: String(process.env.SMTP_USER || "").trim(),
+  pass: String(process.env.SMTP_PASS || ""),
+  from: String(process.env.SMTP_FROM || "").trim(),
+  unsubscribeUrl: String(process.env.EMAIL_UNSUBSCRIBE_URL || "").trim(),
+  physicalAddress: String(process.env.EMAIL_PHYSICAL_ADDRESS || "").trim(),
+  batchLimit: boundedInteger(process.env.SEND_BATCH_LIMIT, 5, 1, 25),
+  delayMs: boundedInteger(process.env.SEND_DELAY_MS, 2000, 500, 30000),
+};
+
+function isSmtpConfigured() {
+  return Boolean(deliveryConfig.host && deliveryConfig.user && deliveryConfig.pass && deliveryConfig.from);
+}
+
+const workflow = [
+  { id: "scope", order: 1, name: "任务与主体冻结", status: "complete", progress: 100, output: "ROOT主体、固定关键词、权限边界" },
+  { id: "customs", order: 2, name: "海关证据采集", status: "complete", progress: 100, output: "中文历史单据与英文主体独立批次" },
+  { id: "buyers", order: 3, name: "买家表抽取", status: "complete", progress: 100, output: "139家买家、金额与交易次数" },
+  { id: "matching", order: 4, name: "买家公司匹配", status: "partial", progress: 14, output: "前20大买家完成，覆盖金额90.77%" },
+  { id: "contacts", order: 5, name: "联系人补全与去重", status: "partial", progress: 14, output: "1,089名去重可联系对象" },
+  { id: "validation", order: 6, name: "邮箱与在职验证", status: "blocked", progress: 0, output: "尚未接入投递验证与在职核验" },
+  { id: "campaign", order: 7, name: "邮件审核与排期", status: "prototype", progress: 25, output: "仅草稿、预览、审核和模拟排期" },
+];
+
+const confidenceRank = { "高": 3, "中高": 2, "中": 1, "低": 0 };
+
+function normalize(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function stableId(...parts) {
+  return crypto.createHash("sha1").update(parts.map((part) => String(part || "")).join("|")).digest("hex").slice(0, 16);
+}
+
+function rolePriority(title, name) {
+  const text = `${title || ""} ${name || ""}`.toLowerCase();
+  if (/purch|procure|supply|production|operation|sourcing|buyer/.test(text)) return "A-采购/运营";
+  if (/director|manager|owner|founder|president|chair|chief|ceo|general manager/.test(text)) return "B-管理层";
+  if (/editor|marketing|product|account|sales|finance|customer/.test(text)) return "C-相关角色";
+  return "D-其他/公共";
+}
+
+function asNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+async function readSource() {
+  const raw = await fs.readFile(sourcePath, "utf8");
+  return JSON.parse(raw);
+}
+
+async function readCampaigns() {
+  try {
+    return JSON.parse(await fs.readFile(campaignPath, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function writeCampaigns(campaigns) {
+  await fs.mkdir(path.dirname(campaignPath), { recursive: true });
+  const tmp = `${campaignPath}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(campaigns, null, 2), "utf8");
+  await fs.rename(tmp, campaignPath);
+}
+
+async function readJsonStore(filePath, fallback) {
+  try {
+    const parsed = JSON.parse(await fs.readFile(filePath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : structuredClone(fallback);
+  } catch (error) {
+    if (error.code === "ENOENT") return structuredClone(fallback);
+    throw error;
+  }
+}
+
+async function writeJsonStore(filePath, value) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(value, null, 2), "utf8");
+  await fs.rename(tmp, filePath);
+}
+
+function emailFingerprint(value) {
+  return crypto.createHash("sha256").update(normalize(value)).digest("hex");
+}
+
+function publicFingerprint(value) {
+  return String(value || "").slice(0, 12);
+}
+
+function buildModel(source) {
+  const matchesByBuyer = new Map(
+    source.top20_company_and_contacts.map((item, index) => [
+      normalize(item.query_name),
+      { ...item, buyerRank: index + 1 },
+    ]),
+  );
+
+  const buyers = source.all_buyers
+    .map((buyer, index) => {
+      const match = matchesByBuyer.get(normalize(buyer.buyer));
+      const contacts = match?.contacts || [];
+      return {
+        id: stableId("buyer", buyer.buyer, buyer.country),
+        sourceIndex: index + 1,
+        buyerRank: match?.buyerRank || null,
+        buyer: buyer.buyer,
+        country: buyer.country,
+        amountUsd: asNumber(buyer.amount_usd),
+        sharePct: asNumber(buyer.share_pct),
+        lastTradeDate: buyer.last_trade_date,
+        tradeCount: asNumber(buyer.trade_count),
+        enrichmentStatus: match ? "已补全" : "待补全",
+        matchedCompany: match?.meta?.matched_company || match?.chosen?.display_name || "",
+        matchConfidence: match?.match_confidence || "未匹配",
+        matchNote: match?.match_note || "",
+        website: match?.meta?.website || match?.chosen?.website || "",
+        companyPhone: match?.meta?.company_phone || "",
+        address: match?.meta?.address || "",
+        claimedContacts: asNumber(match?.meta?.contact_count ?? match?.chosen?.contact_count),
+        accessibleContacts: asNumber(match?.accessible_contact_rows),
+        emailRows: contacts.filter((contact) => contact.email).length,
+        phoneRows: contacts.filter((contact) => contact.phone).length,
+        linkedinRows: contacts.filter((contact) => contact.linkedin).length,
+      };
+    })
+    .sort((a, b) => b.amountUsd - a.amountUsd);
+
+  const seenContactKeys = new Set();
+  const seenEmails = new Set();
+  const contacts = [];
+
+  for (const item of source.top20_company_and_contacts) {
+    const company = item.meta?.matched_company || item.chosen?.display_name || item.query_name;
+    for (const contact of item.contacts || []) {
+      const email = normalize(contact.email);
+      const phone = String(contact.phone || "").trim();
+      const linkedin = normalize(contact.linkedin);
+      const key = `${normalize(company)}|${email}|${phone}|${linkedin}`;
+      const duplicate = seenContactKeys.has(key);
+      const duplicateEmail = email ? seenEmails.has(email) : false;
+      seenContactKeys.add(key);
+      if (email) seenEmails.add(email);
+      contacts.push({
+        id: stableId("contact", item.query_name, key, contact.name),
+        rawBuyerName: item.query_name,
+        country: item.trade?.country || "",
+        amountUsd: asNumber(item.trade?.amount_usd),
+        buyerRank: source.top20_company_and_contacts.indexOf(item) + 1,
+        matchedCompany: company,
+        matchConfidence: item.match_confidence || "",
+        website: item.meta?.website || item.chosen?.website || "",
+        name: contact.name || "",
+        title: contact.title || "",
+        email: contact.email || "",
+        phone,
+        linkedin: contact.linkedin || "",
+        source: contact.source || "",
+        recentlyAdded: Boolean(contact.recently_added),
+        priority: rolePriority(contact.title, contact.name),
+        contactable: Boolean(email || phone || linkedin),
+        validationStatus: email ? "unverified" : "not_applicable",
+        duplicate,
+        duplicateEmail,
+      });
+    }
+  }
+
+  const top20Amount = source.top20_company_and_contacts.reduce((sum, item) => sum + asNumber(item.trade?.amount_usd), 0);
+  const highConfidence = source.top20_company_and_contacts.filter((item) => item.match_confidence === "高").length;
+  const lowConfidence = source.top20_company_and_contacts.filter((item) => item.match_confidence === "低").length;
+
+  return {
+    source,
+    buyers,
+    contacts,
+    summary: {
+      retrievalDate: source.retrieval_date,
+      supplierQuery: source.supplier_query,
+      supplierAmountUsd: asNumber(source.supplier_summary?.amount_usd),
+      supplierTradeCount: asNumber(source.supplier_summary?.trade_count),
+      lastTradeDate: source.supplier_summary?.last_trade_date,
+      buyerCount: asNumber(source.raw_buyer_count),
+      buyerRowsAmountUsd: asNumber(source.raw_buyer_amount_sum_usd),
+      reconciliationDifferenceUsd: asNumber(source.reconciliation_difference_usd),
+      enrichedBuyerCount: source.top20_company_and_contacts.length,
+      top20AmountUsd: top20Amount,
+      top20CoveragePct: source.raw_buyer_amount_sum_usd ? (top20Amount / source.raw_buyer_amount_sum_usd) * 100 : 0,
+      claimedContactTotal: source.top20_company_and_contacts.reduce(
+        (sum, item) => sum + asNumber(item.meta?.contact_count ?? item.chosen?.contact_count),
+        0,
+      ),
+      extractedContactRows: contacts.length,
+      accessibleContactRows: asNumber(source.contact_summary?.raw_linked_rows),
+      uniqueContacts: asNumber(source.contact_summary?.unique_contacts),
+      uniqueEmails: asNumber(source.contact_summary?.unique_emails),
+      uniquePhones: asNumber(source.contact_summary?.unique_phones),
+      duplicateLinks: asNumber(source.contact_summary?.duplicate_links),
+      highConfidence,
+      lowConfidence,
+      sendingEnabled: false,
+      validationEnabled: false,
+    },
+  };
+}
+
+const VALIDATION_STATUSES = new Set([
+  "unverified",
+  "syntax_valid",
+  "domain_valid",
+  "deliverable",
+  "accept_all",
+  "invalid",
+  "opted_out",
+]);
+const SUPPRESSION_REASONS = new Set(["opted_out", "complaint", "hard_bounce", "do_not_contact", "manual"]);
+const FEEDBACK_EVENT_TYPES = new Set(["unsubscribe", "complaint", "hard_bounce", "soft_bounce", "reply", "auto_reply"]);
+const SAFETY_SIGNALS = new Set([
+  "none",
+  "captcha",
+  "frequent_operation",
+  "permission",
+  "http_403",
+  "http_429",
+  "structure_error",
+  "duplicate_page",
+  "page_stuck",
+]);
+const ACTION_TYPES = new Set([
+  "buyer_entry",
+  "company_search",
+  "company_detail",
+  "contact_page",
+  "raw_contact_row",
+  "checkpoint",
+]);
+const validationStore = await readJsonStore(validationPath, { version: 1, records: [] });
+const suppressionStore = await readJsonStore(suppressionPath, { version: 1, records: [] });
+const operationsStore = await readJsonStore(operationsPath, { version: 1, tasks: [] });
+const contactCollectionStore = await readJsonStore(contactCollectionPath, { version: 1, queues: [] });
+const pipelineStore = await readJsonStore(pipelinePath, { version: 1, jobs: [] });
+const outboxStore = await readJsonStore(outboxPath, { version: 1, entries: [] });
+const runtimeStateStore = await readJsonStore(runtimeStatePath, {
+  version: 1,
+  ai: {
+    configured: Boolean(process.env.OPENAI_API_KEY),
+    reachable: null,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastError: "",
+  },
+});
+runtimeStateStore.ai = {
+  configured: Boolean(process.env.OPENAI_API_KEY),
+  reachable: runtimeStateStore.ai?.reachable ?? null,
+  lastAttemptAt: runtimeStateStore.ai?.lastAttemptAt || null,
+  lastSuccessAt: runtimeStateStore.ai?.lastSuccessAt || null,
+  lastError: runtimeStateStore.ai?.lastError || "",
+};
+runtimeStateStore.feedback = {
+  events: Array.isArray(runtimeStateStore.feedback?.events) ? runtimeStateStore.feedback.events.slice(-5000) : [],
+  lastEventAt: runtimeStateStore.feedback?.lastEventAt || null,
+};
+const pipelineTaskIds = new Set((pipelineStore.jobs || []).map((job) => job.operationTaskId).filter(Boolean));
+const legacyTasksWithoutPipeline = (operationsStore.tasks || []).filter((task) => !pipelineTaskIds.has(task.id));
+if (legacyTasksWithoutPipeline.length) {
+  pipelineStore.jobs.unshift(...legacyTasksWithoutPipeline.map((task) => createPipelineJob(task)));
+}
+await Promise.all([
+  writeJsonStore(pipelinePath, pipelineStore),
+  writeJsonStore(outboxPath, outboxStore),
+  writeJsonStore(runtimeStatePath, runtimeStateStore),
+]);
+
+async function updateAiRuntime(patch) {
+  runtimeStateStore.ai = {
+    ...runtimeStateStore.ai,
+    configured: Boolean(process.env.OPENAI_API_KEY),
+    ...patch,
+  };
+  await writeJsonStore(runtimeStatePath, runtimeStateStore);
+}
+
+function validationByHash() {
+  return new Map((validationStore.records || []).map((item) => [item.emailHash, item]));
+}
+
+function suppressionByHash() {
+  return new Map((suppressionStore.records || []).map((item) => [item.emailHash, item]));
+}
+
+function applyLocalContactState(model) {
+  const validations = validationByHash();
+  const suppressions = suppressionByHash();
+  for (const contact of model.contacts) {
+    if (!contact.email) continue;
+    const hash = emailFingerprint(contact.email);
+    const validation = validations.get(hash);
+    contact.validationStatus = suppressions.has(hash)
+      ? "opted_out"
+      : (validation?.status || (validEmail(contact.email) ? "unverified" : "invalid"));
+    contact.validationCheckedAt = validation?.checkedAt || "";
+    contact.validationEvidence = validation?.evidence || "";
+    contact.suppressed = suppressions.has(hash);
+  }
+}
+
+function isSuppressed(email) {
+  return Boolean(email) && suppressionByHash().has(emailFingerprint(email));
+}
+
+function upsertValidation(record) {
+  const records = validationStore.records || (validationStore.records = []);
+  const index = records.findIndex((item) => item.emailHash === record.emailHash);
+  if (index >= 0) records[index] = { ...records[index], ...record };
+  else records.push(record);
+}
+
+function secretMatches(actual, expected) {
+  if (!actual || !expected) return false;
+  const actualBuffer = Buffer.from(String(actual));
+  const expectedBuffer = Buffer.from(String(expected));
+  return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function upsertSuppression({ emailHash, domain, reason, source, createdAt }) {
+  const records = suppressionStore.records || (suppressionStore.records = []);
+  const existing = records.find((item) => item.emailHash === emailHash);
+  if (existing) return { record: existing, existing: true };
+  const record = { emailHash, domain, reason, source, createdAt };
+  records.push(record);
+  return { record, existing: false };
+}
+
+async function recordFeedbackEvent(input, source) {
+  const eventId = String(input.eventId || "").trim().slice(0, 200);
+  const type = String(input.type || "").trim();
+  const email = normalize(input.email);
+  const suppliedHash = String(input.recipientHash || "").trim().toLowerCase();
+  if (!/^[a-zA-Z0-9._:-]{1,200}$/.test(eventId)) {
+    throw Object.assign(new Error("反馈事件缺少有效eventId"), { status: 422 });
+  }
+  if (!FEEDBACK_EVENT_TYPES.has(type)) {
+    throw Object.assign(new Error("不支持的反馈事件类型"), { status: 422 });
+  }
+  if (!validEmail(email) && !/^[a-f0-9]{64}$/.test(suppliedHash)) {
+    throw Object.assign(new Error("反馈事件需要有效邮箱或recipientHash"), { status: 422 });
+  }
+  const existing = runtimeStateStore.feedback.events.find((item) => item.eventId === eventId && item.source === source);
+  if (existing) {
+    return { duplicate: true, event: existing, suppressed: isSuppressed(email), outboxMatched: Boolean(existing.outboxId) };
+  }
+
+  const recipientHash = validEmail(email) ? emailFingerprint(email) : suppliedHash;
+  const domain = validEmail(email) ? email.split("@")[1] : "";
+  const messageId = sanitizeHeader(input.messageId).replace(/^<|>$/g, "").slice(0, 300);
+  const occurredAt = Number.isFinite(Date.parse(input.occurredAt)) ? new Date(input.occurredAt).toISOString() : new Date().toISOString();
+  const recordedAt = new Date().toISOString();
+  const outboxEntry = (outboxStore.entries || []).find((item) => (
+    (messageId && item.messageId === messageId) || item.recipientHash === recipientHash
+  ));
+  if (outboxEntry) {
+    outboxEntry.updatedAt = recordedAt;
+    outboxEntry.events = [...(outboxEntry.events || []), {
+      at: occurredAt,
+      status: outboxEntry.status,
+      type: `feedback_${type}`,
+    }].slice(-100);
+    if (["hard_bounce", "complaint", "unsubscribe"].includes(type)) {
+      outboxEntry.lastError = `feedback:${type}`;
+    }
+  }
+
+  const suppressionReason = {
+    unsubscribe: "opted_out",
+    complaint: "complaint",
+    hard_bounce: "hard_bounce",
+  }[type];
+  let suppressed = false;
+  if (suppressionReason) {
+    upsertSuppression({
+      emailHash: recipientHash,
+      domain,
+      reason: suppressionReason,
+      source: `feedback:${source}`,
+      createdAt: recordedAt,
+    });
+    upsertValidation({
+      emailHash: recipientHash,
+      domain,
+      status: type === "hard_bounce" ? "invalid" : "opted_out",
+      checkedAt: recordedAt,
+      evidence: `feedback:${type}`,
+      mxHosts: [],
+    });
+    suppressed = true;
+  }
+
+  const event = {
+    eventId,
+    source,
+    type,
+    recipientHash,
+    domain,
+    messageId,
+    occurredAt,
+    recordedAt,
+    outboxId: outboxEntry?.id || "",
+    campaignId: outboxEntry?.campaignId || "",
+  };
+  runtimeStateStore.feedback.events = [...runtimeStateStore.feedback.events, event].slice(-5000);
+  runtimeStateStore.feedback.lastEventAt = recordedAt;
+  await Promise.all([
+    writeJsonStore(runtimeStatePath, runtimeStateStore),
+    writeJsonStore(outboxPath, outboxStore),
+    writeJsonStore(suppressionPath, suppressionStore),
+    writeJsonStore(validationPath, validationStore),
+  ]);
+  applyLocalContactState(model);
+  return { duplicate: false, event, suppressed, outboxMatched: Boolean(outboxEntry) };
+}
+
+async function validateEmailDomain(email, mode = "domain") {
+  const normalizedEmail = normalize(email);
+  const emailHash = emailFingerprint(normalizedEmail);
+  const checkedAt = new Date().toISOString();
+  const domain = normalizedEmail.split("@")[1] || "";
+  if (!validEmail(normalizedEmail)) {
+    return { emailHash, domain, status: "invalid", checkedAt, evidence: "invalid_format", mxHosts: [] };
+  }
+  if (mode === "syntax") {
+    return { emailHash, domain, status: "syntax_valid", checkedAt, evidence: "local_syntax", mxHosts: [] };
+  }
+  try {
+    const mx = await dns.resolveMx(domain);
+    const mxHosts = mx.sort((a, b) => a.priority - b.priority).map((item) => item.exchange).filter(Boolean).slice(0, 10);
+    if (mxHosts.length) {
+      return { emailHash, domain, status: "domain_valid", checkedAt, evidence: "dns_mx", mxHosts };
+    }
+  } catch (error) {
+    if (!["ENODATA", "ENOTFOUND", "ESERVFAIL"].includes(error.code)) {
+      return { emailHash, domain, status: "syntax_valid", checkedAt, evidence: `dns_temporary:${error.code || "error"}`, mxHosts: [] };
+    }
+  }
+  try {
+    const addresses = await dns.resolve(domain);
+    if (addresses.length) {
+      return { emailHash, domain, status: "domain_valid", checkedAt, evidence: "dns_address_fallback", mxHosts: [] };
+    }
+  } catch (error) {
+    if (!["ENODATA", "ENOTFOUND", "ESERVFAIL"].includes(error.code)) {
+      return { emailHash, domain, status: "syntax_valid", checkedAt, evidence: `dns_temporary:${error.code || "error"}`, mxHosts: [] };
+    }
+  }
+  return { emailHash, domain, status: "invalid", checkedAt, evidence: "domain_not_resolved", mxHosts: [] };
+}
+
+function publicValidationSummary(model) {
+  const counts = model.contacts.reduce((result, item) => {
+    const key = item.validationStatus || "unverified";
+    result[key] = (result[key] || 0) + 1;
+    return result;
+  }, {});
+  return {
+    counts,
+    storedRecords: (validationStore.records || []).length,
+    suppressions: (suppressionStore.records || []).length,
+    records: (validationStore.records || []).slice(-100).reverse().map((item) => ({
+      fingerprint: publicFingerprint(item.emailHash),
+      domain: item.domain,
+      status: item.status,
+      checkedAt: item.checkedAt,
+      evidence: item.evidence,
+      mxCount: item.mxHosts?.length || 0,
+    })),
+  };
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function backupDigest(payload) {
+  return crypto.createHash("sha256").update(canonicalJson(payload)).digest("hex");
+}
+
+async function createLocalBackup() {
+  const payload = {
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    sourceFile: path.basename(sourcePath),
+    scope: "local_control_state_only",
+    stores: {
+      contactValidation: structuredClone(validationStore),
+      suppressions: structuredClone(suppressionStore),
+      operations: structuredClone(operationsStore),
+      contactCollection: structuredClone(contactCollectionStore),
+      pipeline: structuredClone(pipelineStore),
+      outbox: structuredClone(outboxStore),
+      runtimeState: structuredClone(runtimeStateStore),
+      campaigns: await readCampaigns(),
+    },
+  };
+  return {
+    ...payload,
+    integrity: {
+      algorithm: "sha256",
+      digest: backupDigest(payload),
+    },
+  };
+}
+
+function validateLocalBackup(input) {
+  const errors = [];
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { valid: false, errors: ["备份必须是JSON对象"], counts: {} };
+  }
+  const { integrity, ...payload } = input;
+  if (payload.schemaVersion !== 1) errors.push("不支持的备份版本");
+  if (payload.scope !== "local_control_state_only") errors.push("备份范围不正确");
+  if (!payload.stores || typeof payload.stores !== "object") errors.push("缺少stores对象");
+  const stores = payload.stores || {};
+  const validationRecords = stores.contactValidation?.records;
+  const suppressionRecords = stores.suppressions?.records;
+  const tasks = stores.operations?.tasks;
+  const collectionQueues = stores.contactCollection?.queues || [];
+  const pipelineJobs = stores.pipeline?.jobs || [];
+  const outboxEntries = stores.outbox?.entries || [];
+  const campaigns = stores.campaigns;
+  if (!Array.isArray(validationRecords)) errors.push("contactValidation.records必须是数组");
+  if (!Array.isArray(suppressionRecords)) errors.push("suppressions.records必须是数组");
+  if (!Array.isArray(tasks)) errors.push("operations.tasks必须是数组");
+  if (stores.contactCollection && !Array.isArray(stores.contactCollection.queues)) errors.push("contactCollection.queues必须是数组");
+  if (stores.pipeline && !Array.isArray(stores.pipeline.jobs)) errors.push("pipeline.jobs必须是数组");
+  if (stores.outbox && !Array.isArray(stores.outbox.entries)) errors.push("outbox.entries必须是数组");
+  if (!Array.isArray(campaigns)) errors.push("campaigns必须是数组");
+  if (stores.contactValidation?.version !== 1) errors.push("contactValidation版本不受支持");
+  if (stores.suppressions?.version !== 1) errors.push("suppressions版本不受支持");
+  if (stores.operations?.version !== 1) errors.push("operations版本不受支持");
+  if (stores.contactCollection && stores.contactCollection.version !== 1) errors.push("contactCollection版本不受支持");
+  if (stores.pipeline && stores.pipeline.version !== 1) errors.push("pipeline版本不受支持");
+  if (stores.outbox && stores.outbox.version !== 1) errors.push("outbox版本不受支持");
+  if (stores.runtimeState && stores.runtimeState.version !== 1) errors.push("runtimeState版本不受支持");
+  if ((validationRecords?.length || 0) > 100000) errors.push("邮箱验证记录超过100,000条上限");
+  if ((suppressionRecords?.length || 0) > 100000) errors.push("抑制记录超过100,000条上限");
+  if ((tasks?.length || 0) > 10000) errors.push("任务记录超过10,000条上限");
+  if (collectionQueues.length > 1000) errors.push("联系人采集队列超过1,000条上限");
+  if (pipelineJobs.length > 10000) errors.push("流水线记录超过10,000条上限");
+  if (outboxEntries.length > 100000) errors.push("发件箱记录超过100,000条上限");
+  if ((campaigns?.length || 0) > 10000) errors.push("活动记录超过10,000条上限");
+  for (const record of [...(validationRecords || []), ...(suppressionRecords || [])].slice(0, 200000)) {
+    if (!/^[a-f0-9]{64}$/.test(String(record?.emailHash || ""))) errors.push("邮箱记录包含无效哈希");
+    if (Object.hasOwn(record || {}, "email")) errors.push("控制备份不得包含明文邮箱字段");
+  }
+  for (const task of (tasks || []).slice(0, 10000)) {
+    if (!/^task_[a-f0-9-]+$/i.test(String(task?.id || ""))) errors.push("任务ID格式无效");
+    if (!/^\d{4,10}$/.test(String(task?.hsCode || ""))) errors.push("任务HSCode格式无效");
+  }
+  for (const campaign of (campaigns || []).slice(0, 10000)) {
+    if (!/^cmp_[a-f0-9-]+$/i.test(String(campaign?.id || ""))) errors.push("活动ID格式无效");
+  }
+  for (const job of pipelineJobs.slice(0, 10000)) {
+    if (!/^pipe_[a-f0-9-]+$/i.test(String(job?.id || ""))) errors.push("流水线ID格式无效");
+    if (!/^\d{4,10}$/.test(String(job?.hsCode || ""))) errors.push("流水线HSCode格式无效");
+  }
+  for (const entry of outboxEntries.slice(0, 100000)) {
+    if (!/^out_[a-f0-9-]+$/i.test(String(entry?.id || ""))) errors.push("发件箱ID格式无效");
+    if (!/^[a-f0-9]{64}$/.test(String(entry?.recipientHash || ""))) errors.push("发件箱收件人哈希无效");
+    if (Object.hasOwn(entry || {}, "email") || Object.hasOwn(entry || {}, "recipientEmail")) errors.push("控制备份不得包含明文收件邮箱");
+  }
+  const duplicateKey = (items, key) => {
+    const seen = new Set();
+    for (const item of items || []) {
+      const value = String(item?.[key] || "");
+      if (seen.has(value)) return true;
+      seen.add(value);
+    }
+    return false;
+  };
+  if (duplicateKey(validationRecords, "emailHash")) errors.push("邮箱验证记录包含重复哈希");
+  if (duplicateKey(suppressionRecords, "emailHash")) errors.push("抑制记录包含重复哈希");
+  if (duplicateKey(tasks, "id")) errors.push("任务记录包含重复ID");
+  if (duplicateKey(collectionQueues, "id")) errors.push("联系人采集队列包含重复ID");
+  if (duplicateKey(campaigns, "id")) errors.push("活动记录包含重复ID");
+  if (duplicateKey(pipelineJobs, "id")) errors.push("流水线记录包含重复ID");
+  if (duplicateKey(outboxEntries, "id")) errors.push("发件箱记录包含重复ID");
+  if (integrity?.algorithm !== "sha256" || !/^[a-f0-9]{64}$/.test(String(integrity?.digest || ""))) {
+    errors.push("缺少有效的SHA-256完整性摘要");
+  } else if (backupDigest(payload) !== integrity.digest) {
+    errors.push("备份完整性摘要不匹配");
+  }
+  return {
+    valid: errors.length === 0,
+    errors: [...new Set(errors)],
+    schemaVersion: payload.schemaVersion,
+    exportedAt: payload.exportedAt || "",
+    counts: {
+      validationRecords: validationRecords?.length || 0,
+      suppressions: suppressionRecords?.length || 0,
+      operationTasks: tasks?.length || 0,
+      contactQueues: collectionQueues.length,
+      pipelineJobs: pipelineJobs.length,
+      outboxEntries: outboxEntries.length,
+      campaigns: campaigns?.length || 0,
+    },
+  };
+}
+
+function mergeCurrentFirst(currentItems, incomingItems, key) {
+  const currentKeys = new Set(currentItems.map((item) => String(item?.[key] || "")));
+  const added = incomingItems.filter((item) => !currentKeys.has(String(item?.[key] || "")));
+  return {
+    items: [...structuredClone(currentItems), ...structuredClone(added)],
+    added: added.length,
+    conflicts: incomingItems.length - added.length,
+  };
+}
+
+function buildBackupMergePlan(backup, currentCampaigns) {
+  const validation = validateLocalBackup(backup);
+  if (!validation.valid) return { ...validation, confirmation: "", stores: null };
+  const incoming = backup.stores;
+  const validations = mergeCurrentFirst(validationStore.records || [], incoming.contactValidation.records, "emailHash");
+  const suppressions = mergeCurrentFirst(suppressionStore.records || [], incoming.suppressions.records, "emailHash");
+  const operations = mergeCurrentFirst(operationsStore.tasks || [], incoming.operations.tasks, "id");
+  const contactQueues = mergeCurrentFirst(contactCollectionStore.queues || [], incoming.contactCollection?.queues || [], "id");
+  const pipelines = mergeCurrentFirst(pipelineStore.jobs || [], incoming.pipeline?.jobs || [], "id");
+  const outbox = mergeCurrentFirst(outboxStore.entries || [], incoming.outbox?.entries || [], "id");
+  const campaigns = mergeCurrentFirst(currentCampaigns, incoming.campaigns, "id");
+  const current = {
+    validationRecords: (validationStore.records || []).length,
+    suppressions: (suppressionStore.records || []).length,
+    operationTasks: (operationsStore.tasks || []).length,
+    contactQueues: (contactCollectionStore.queues || []).length,
+    pipelineJobs: (pipelineStore.jobs || []).length,
+    outboxEntries: (outboxStore.entries || []).length,
+    campaigns: currentCampaigns.length,
+  };
+  const added = {
+    validationRecords: validations.added,
+    suppressions: suppressions.added,
+    operationTasks: operations.added,
+    contactQueues: contactQueues.added,
+    pipelineJobs: pipelines.added,
+    outboxEntries: outbox.added,
+    campaigns: campaigns.added,
+  };
+  const conflicts = {
+    validationRecords: validations.conflicts,
+    suppressions: suppressions.conflicts,
+    operationTasks: operations.conflicts,
+    contactQueues: contactQueues.conflicts,
+    pipelineJobs: pipelines.conflicts,
+    outboxEntries: outbox.conflicts,
+    campaigns: campaigns.conflicts,
+  };
+  const effective = Object.fromEntries(Object.keys(current).map((key) => [key, current[key] + added[key]]));
+  return {
+    ...validation,
+    current,
+    incoming: validation.counts,
+    added,
+    conflicts,
+    effective,
+    confirmation: `MERGE ${backup.integrity.digest.slice(0, 12).toUpperCase()}`,
+    stores: {
+      contactValidation: { version: 1, records: validations.items },
+      suppressions: { version: 1, records: suppressions.items },
+      operations: { version: 1, tasks: operations.items },
+      contactCollection: { version: 1, queues: contactQueues.items },
+      pipeline: { version: 1, jobs: pipelines.items },
+      outbox: { version: 1, entries: outbox.items },
+      runtimeState: structuredClone(runtimeStateStore),
+      campaigns: campaigns.items,
+    },
+  };
+}
+
+function replaceObjectContents(target, value) {
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target, structuredClone(value));
+}
+
+async function commitMergedStores(stores, rollbackBackup) {
+  const transactionId = crypto.randomUUID();
+  const rollbackName = `rollback-${new Date().toISOString().replace(/[:.]/g, "-")}-${transactionId}.json`;
+  const rollbackPath = path.join(localBackupDir, rollbackName);
+  await writeJsonStore(rollbackPath, rollbackBackup);
+
+  const originals = {
+    contactValidation: structuredClone(validationStore),
+    suppressions: structuredClone(suppressionStore),
+    operations: structuredClone(operationsStore),
+    contactCollection: structuredClone(contactCollectionStore),
+    pipeline: structuredClone(pipelineStore),
+    outbox: structuredClone(outboxStore),
+    runtimeState: structuredClone(runtimeStateStore),
+    campaigns: await readCampaigns(),
+  };
+  const targets = [
+    [validationPath, stores.contactValidation, originals.contactValidation],
+    [suppressionPath, stores.suppressions, originals.suppressions],
+    [operationsPath, stores.operations, originals.operations],
+    [contactCollectionPath, stores.contactCollection, originals.contactCollection],
+    [pipelinePath, stores.pipeline, originals.pipeline],
+    [outboxPath, stores.outbox, originals.outbox],
+    [runtimeStatePath, stores.runtimeState, originals.runtimeState],
+    [campaignPath, stores.campaigns, originals.campaigns],
+  ];
+  const staged = targets.map(([filePath]) => `${filePath}.merge-${transactionId}.tmp`);
+  try {
+    for (let index = 0; index < targets.length; index += 1) {
+      const [filePath, value] = targets[index];
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(staged[index], JSON.stringify(value, null, 2), "utf8");
+    }
+    for (let index = 0; index < targets.length; index += 1) {
+      await fs.rename(staged[index], targets[index][0]);
+    }
+  } catch (error) {
+    const rollbackErrors = [];
+    for (const [filePath, , original] of targets) {
+      try {
+        await writeJsonStore(filePath, original);
+      } catch (rollbackError) {
+        rollbackErrors.push(`${path.basename(filePath)}:${rollbackError.message}`);
+      }
+    }
+    const details = rollbackErrors.length ? `；回滚异常：${rollbackErrors.join("；")}` : "；已回滚到合并前状态";
+    throw Object.assign(new Error(`安全合并写入失败${details}`), { status: 500, cause: error });
+  } finally {
+    await Promise.all(staged.map((filePath) => fs.rm(filePath, { force: true }).catch(() => {})));
+  }
+
+  replaceObjectContents(validationStore, stores.contactValidation);
+  replaceObjectContents(suppressionStore, stores.suppressions);
+  replaceObjectContents(operationsStore, stores.operations);
+  replaceObjectContents(contactCollectionStore, stores.contactCollection);
+  replaceObjectContents(pipelineStore, stores.pipeline);
+  replaceObjectContents(outboxStore, stores.outbox);
+  replaceObjectContents(runtimeStateStore, stores.runtimeState);
+  return rollbackName;
+}
+
+function currentBusinessDate() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date());
+}
+
+function cleanTaskInput(input) {
+  const hsCode = String(input.hsCode || "").trim();
+  if (!/^\d{4,10}$/.test(hsCode)) throw Object.assign(new Error("HSCode必须是4至10位数字"), { status: 422 });
+  const direction = input.direction === "supplier" ? "supplier" : "buyer";
+  const bounded = (value, fallback, min, max) => boundedInteger(value, fallback, min, max);
+  return {
+    hsCode,
+    direction,
+    countries: [...new Set((Array.isArray(input.countries) ? input.countries : [])
+      .map((item) => String(item).trim().slice(0, 80)).filter(Boolean))].slice(0, 20),
+    budgets: {
+      buyerEntriesDaily: bounded(input.budgets?.buyerEntriesDaily, 100, 1, 2000),
+      companyDetailsDaily: bounded(input.budgets?.companyDetailsDaily, 5, 1, 40),
+      contactPagesDaily: bounded(input.budgets?.contactPagesDaily, 25, 1, 300),
+    },
+  };
+}
+
+function taskPublicView(task) {
+  return {
+    ...task,
+    audit: (task.audit || []).slice(-100).reverse(),
+  };
+}
+
+function resetDailyCounters(task, businessDate) {
+  if (task.counters?.businessDate === businessDate) return;
+  task.counters = {
+    businessDate,
+    buyerEntries: 0,
+    companySearches: 0,
+    companyDetails: 0,
+    contactPages: 0,
+    rawContactRows: 0,
+  };
+}
+
+function counterForAction(type) {
+  return {
+    buyer_entry: "buyerEntries",
+    company_search: "companySearches",
+    company_detail: "companyDetails",
+    contact_page: "contactPages",
+    raw_contact_row: "rawContactRows",
+  }[type] || "";
+}
+
+function actionBudget(task, type) {
+  return {
+    buyer_entry: task.budgets.buyerEntriesDaily,
+    company_detail: task.budgets.companyDetailsDaily,
+    contact_page: task.budgets.contactPagesDaily,
+  }[type] || null;
+}
+
+function recordTaskAction(task, input) {
+  const type = String(input.type || "");
+  if (!ACTION_TYPES.has(type)) throw Object.assign(new Error("不支持的动作类型"), { status: 422 });
+  if (input.type === "background_deep_mining") throw Object.assign(new Error("生产流程禁止后台深挖任务"), { status: 422 });
+  const signal = String(input.signal || "none");
+  if (!SAFETY_SIGNALS.has(signal)) throw Object.assign(new Error("不支持的安全信号"), { status: 422 });
+  const businessDate = String(input.businessDate || currentBusinessDate()).slice(0, 10);
+  resetDailyCounters(task, businessDate);
+  if (task.safetyState === "CIRCUIT_OPEN") throw Object.assign(new Error("任务已熔断，必须人工恢复后才能记录新动作"), { status: 423 });
+  const count = boundedInteger(input.count, 1, 1, type === "raw_contact_row" ? 10000 : 500);
+  const counter = counterForAction(type);
+  const budget = actionBudget(task, type);
+  if (counter && budget !== null && task.counters[counter] + count > budget) {
+    const now = new Date().toISOString();
+    task.safetyState = "THROTTLED";
+    task.status = "paused";
+    task.updatedAt = now;
+    task.audit = [...(task.audit || []), {
+      at: now,
+      type: "budget_rejected",
+      requestedAction: type,
+      requestedCount: count,
+      currentCount: task.counters[counter],
+      budget,
+      safetyState: task.safetyState,
+    }].slice(-1000);
+    throw Object.assign(new Error(`动作将超过当日预算：${type} ${task.counters[counter]}/${budget}`), { status: 429 });
+  }
+  if (counter) task.counters[counter] += count;
+  const severe = ["captcha", "frequent_operation", "permission", "http_403", "http_429"].includes(signal);
+  const anomaly = ["structure_error", "duplicate_page", "page_stuck"].includes(signal);
+  task.consecutiveAnomalies = signal === "none" ? 0 : (task.consecutiveAnomalies || 0) + (anomaly ? 1 : 0);
+  if (severe || task.consecutiveAnomalies >= 3) {
+    task.safetyState = "CIRCUIT_OPEN";
+    task.status = "paused";
+  } else if (signal !== "none") {
+    task.safetyState = "THROTTLED";
+  } else {
+    task.safetyState = "RUNNING";
+    task.status = "active";
+  }
+  const now = new Date().toISOString();
+  if (input.checkpoint && typeof input.checkpoint === "object") {
+    task.checkpoint = {
+      company: String(input.checkpoint.company || "").slice(0, 300),
+      page: boundedInteger(input.checkpoint.page, 0, 0, 10000),
+      extracted: boundedInteger(input.checkpoint.extracted, 0, 0, 1000000),
+      note: String(input.checkpoint.note || "").slice(0, 500),
+      at: now,
+    };
+  }
+  task.updatedAt = now;
+  task.audit = [...(task.audit || []), {
+    at: now,
+    type,
+    count,
+    signal,
+    safetyState: task.safetyState,
+    counters: { ...task.counters },
+  }].slice(-1000);
+  return task;
+}
+
+const DEFAULT_COLLECTION_SOURCES = [
+  {
+    sourceId: "hung_hing",
+    path: "outputs/Hung_Hing_Printing_网易买家原始清单_2026-08-11.json",
+  },
+  {
+    sourceId: "amity",
+    path: "outputs/Amity_Printing_网易买家原始清单_2026-08-11.json",
+  },
+];
+const DEFAULT_COLLECTION_RESULTS = [
+  "outputs/20260811_hung_hing_amity_buyers_contacts/本轮续采原始结果_2026-08-11.json",
+];
+const DEFAULT_IMPORTED_COMPLETIONS = [
+  "SCHOLASTIC",
+  "THE BIBLE SOCIETY OF INDIA",
+  "PACIFIC PRESS PUBLISHING ASSOCIATIO",
+];
+
+function resolveWorkspaceJson(inputPath) {
+  const value = String(inputPath || "").trim();
+  if (!value) throw Object.assign(new Error("JSON文件路径不能为空"), { status: 422 });
+  const resolved = path.resolve(workspaceDir, value);
+  const relative = path.relative(workspaceDir, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative) || path.extname(resolved).toLowerCase() !== ".json") {
+    throw Object.assign(new Error("采集队列只允许读取项目目录内的JSON文件"), { status: 422 });
+  }
+  return resolved;
+}
+
+async function readCollectionSource(spec) {
+  const filePath = resolveWorkspaceJson(spec.path);
+  let parsed;
+  try {
+    parsed = JSON.parse(await fs.readFile(filePath, "utf8"));
+  } catch (error) {
+    throw Object.assign(new Error(`无法读取买家清单：${path.basename(filePath)} (${error.message})`), { status: 422 });
+  }
+  const buyers = Array.isArray(parsed.buyers)
+    ? parsed.buyers
+    : Array.isArray(parsed.records)
+      ? parsed.records
+      : [];
+  if (!buyers.length) throw Object.assign(new Error(`买家清单没有可用buyers/records：${path.basename(filePath)}`), { status: 422 });
+  return {
+    sourceId: String(spec.sourceId || path.basename(filePath, ".json")).trim().slice(0, 120),
+    buyers,
+    reference: path.relative(workspaceDir, filePath).replaceAll("\\", "/"),
+  };
+}
+
+async function readProcessedCompanyNames(paths) {
+  const names = [];
+  for (const inputPath of paths) {
+    const filePath = resolveWorkspaceJson(inputPath);
+    try {
+      const parsed = JSON.parse(await fs.readFile(filePath, "utf8"));
+      for (const result of Array.isArray(parsed.results) ? parsed.results : []) {
+        const name = String(result.query || result.companyName || "").trim();
+        if (name) names.push(name);
+      }
+    } catch (error) {
+      throw Object.assign(new Error(`无法读取历史采集结果：${path.basename(filePath)} (${error.message})`), { status: 422 });
+    }
+  }
+  return names;
+}
+
+function collectionSignalFromResult(result) {
+  const explicit = String(result.signal || "");
+  if (COLLECTION_SIGNALS.has(explicit)) return explicit;
+  const alarmText = (Array.isArray(result.alarm) ? result.alarm : [result.alarm]).filter(Boolean).join(" ");
+  if (/验证码|安全验证/i.test(alarmText)) return "captcha";
+  if (/操作频繁|访问过于频繁|请求过于频繁/i.test(alarmText)) return "frequent_operation";
+  if (/权限不足|暂无权限/i.test(alarmText)) return "permission";
+  if (/\b403\b/.test(alarmText)) return "http_403";
+  if (/\b429\b/.test(alarmText)) return "http_429";
+  if (result.status === "no_table") return "structure_error";
+  if (result.status === "browser_disconnected") return "browser_disconnected";
+  if (result.status === "auth_required") return "auth_required";
+  if (result.status === "error" || result.status === "timeout") return "control_timeout";
+  return "none";
+}
+
+function collectionOutcomeFromResult(result, signal) {
+  if (SEVERE_PLATFORM_SIGNALS.has(signal) || STRUCTURE_SIGNALS.has(signal)) return "error";
+  if (["control_timeout", "browser_disconnected", "auth_required"].includes(signal)) return "error";
+  if (["no_result", "not_found"].includes(result.status)) return "no_result";
+  if (result.status === "skipped") return "skipped";
+  return result.status === "ok" ? "ok" : "error";
+}
+
+async function writeCollectionArtifact(queue, batch, rawResults) {
+  if (!Array.isArray(rawResults) || !rawResults.length) return "";
+  const safeQueue = queue.id.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeBatch = batch.id.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const directory = path.join(contactCollectionArtifactDir, safeQueue);
+  const filePath = path.join(directory, `${new Date().toISOString().replace(/[:.]/g, "-")}_${safeBatch}.json`);
+  await fs.mkdir(directory, { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    source: "https://waimao.office.163.com/#wmData?page=globalSearch",
+    queueId: queue.id,
+    batchId: batch.id,
+    results: rawResults,
+  }, null, 2), "utf8");
+  return path.relative(workspaceDir, filePath).replaceAll("\\", "/");
+}
+
+function summarizeCollectionResults(queue, batch, rawResults) {
+  const batchItems = new Map(batch.itemIds.map((id) => {
+    const item = queue.items.find((candidate) => candidate.id === id);
+    return [normalizeCompanyName(item?.companyName), item];
+  }));
+  return (Array.isArray(rawResults) ? rawResults : []).map((result) => {
+    const item = result.itemId
+      ? queue.items.find((candidate) => candidate.id === result.itemId)
+      : batchItems.get(normalizeCompanyName(result.query || result.companyName));
+    const signal = collectionSignalFromResult(result);
+    return {
+      itemId: item?.id || "",
+      outcome: collectionOutcomeFromResult(result, signal),
+      signal,
+      contactRows: Array.isArray(result.contacts) ? result.contacts.length : Number(result.contactRows || 0),
+      error: String(result.error || (signal !== "none" ? result.status || signal : "")).slice(0, 500),
+    };
+  }).filter((result) => result.itemId);
+}
+
+function pipelineJobPublicView(job) {
+  return {
+    ...job,
+    audit: (job.audit || []).slice(-100).reverse(),
+  };
+}
+
+function createPipelineJob(task, input = {}) {
+  const now = new Date().toISOString();
+  const inputReference = String(input.inputReference || "").trim().slice(0, 500);
+  return {
+    id: `pipe_${crypto.randomUUID()}`,
+    operationTaskId: task?.id || null,
+    hsCode: String(input.hsCode || task?.hsCode || ""),
+    direction: input.direction === "supplier" || task?.direction === "supplier" ? "supplier" : "buyer",
+    countries: structuredClone(input.countries || task?.countries || []),
+    status: inputReference ? "queued" : "waiting_input",
+    currentStage: "discovery",
+    requiredInput: inputReference ? "" : "需要在网易正常页面完成HSCode检索，并提供可追溯的结果文件或页面检查点",
+    inputReference,
+    stages: Object.fromEntries(PIPELINE_STAGES.map((stage) => [stage, {
+      status: stage === "discovery" ? (inputReference ? "queued" : "waiting_input") : "pending",
+      attempts: 0,
+      updatedAt: now,
+    }])),
+    artifacts: [],
+    leaseOwner: "",
+    leaseExpiresAt: null,
+    createdAt: now,
+    updatedAt: now,
+    audit: [{ at: now, type: "pipeline_created", status: inputReference ? "queued" : "waiting_input" }],
+  };
+}
+
+function sanitizePipelineArtifact(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const counts = {};
+  for (const [key, value] of Object.entries(input.counts || {}).slice(0, 20)) {
+    const safeKey = String(key).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 60);
+    if (safeKey) counts[safeKey] = boundedInteger(value, 0, 0, 10000000);
+  }
+  return {
+    reference: String(input.reference || "").trim().slice(0, 500),
+    note: String(input.note || "").trim().slice(0, 1000),
+    counts,
+  };
+}
+
+function pipelineSummary() {
+  const jobs = pipelineStore.jobs || [];
+  const counts = Object.fromEntries([...PIPELINE_STATUSES].map((status) => [status, jobs.filter((job) => job.status === status).length]));
+  return {
+    version: pipelineStore.version,
+    stages: PIPELINE_STAGES,
+    counts,
+    claimable: jobs.filter((job) => job.status === "queued").length,
+    jobs: jobs.map(pipelineJobPublicView),
+  };
+}
+
+function claimNextPipelineJob(owner, leaseSeconds) {
+  const nowMs = Date.now();
+  const expired = (pipelineStore.jobs || []).filter((job) => (
+    job.status === "running" && job.leaseExpiresAt && Date.parse(job.leaseExpiresAt) <= nowMs
+  ));
+  for (const job of expired) {
+    job.status = "queued";
+    job.leaseOwner = "";
+    job.leaseExpiresAt = null;
+    job.audit = [...(job.audit || []), { at: new Date().toISOString(), type: "lease_expired_requeued" }].slice(-1000);
+  }
+  const job = (pipelineStore.jobs || []).find((item) => item.status === "queued");
+  if (!job) return null;
+  const now = new Date().toISOString();
+  job.status = "running";
+  job.leaseOwner = owner;
+  job.leaseExpiresAt = new Date(nowMs + leaseSeconds * 1000).toISOString();
+  job.stages[job.currentStage] = {
+    ...(job.stages[job.currentStage] || {}),
+    status: "running",
+    attempts: Number(job.stages[job.currentStage]?.attempts || 0) + 1,
+    updatedAt: now,
+  };
+  job.updatedAt = now;
+  job.audit = [...(job.audit || []), { at: now, type: "stage_claimed", stage: job.currentStage, owner }].slice(-1000);
+  return job;
+}
+
+function updatePipelineStage(job, input) {
+  const stage = String(input.stage || job.currentStage);
+  if (stage !== job.currentStage || !PIPELINE_STAGES.includes(stage)) {
+    throw Object.assign(new Error("只能更新当前流水线阶段"), { status: 409 });
+  }
+  if (job.status !== "running") throw Object.assign(new Error("流水线任务尚未被执行器领取"), { status: 409 });
+  const owner = String(input.owner || "").trim().slice(0, 120);
+  if (!owner || owner !== job.leaseOwner) throw Object.assign(new Error("执行器租约不匹配"), { status: 409 });
+  const outcome = String(input.outcome || "completed");
+  if (!["completed", "waiting_input", "circuit_open", "paused"].includes(outcome)) {
+    throw Object.assign(new Error("不支持的阶段结果"), { status: 422 });
+  }
+  const now = new Date().toISOString();
+  const artifact = sanitizePipelineArtifact(input.artifact);
+  if (artifact && (artifact.reference || artifact.note || Object.keys(artifact.counts).length)) {
+    job.artifacts = [...(job.artifacts || []), { stage, at: now, ...artifact }].slice(-500);
+  }
+  job.stages[stage] = { ...(job.stages[stage] || {}), status: outcome, updatedAt: now };
+  job.leaseOwner = "";
+  job.leaseExpiresAt = null;
+  job.updatedAt = now;
+  if (outcome === "completed") {
+    const index = PIPELINE_STAGES.indexOf(stage);
+    if (index === PIPELINE_STAGES.length - 1) {
+      job.status = "completed";
+      job.requiredInput = "";
+    } else {
+      job.currentStage = PIPELINE_STAGES[index + 1];
+      job.status = "queued";
+      job.stages[job.currentStage] = { ...(job.stages[job.currentStage] || {}), status: "queued", updatedAt: now };
+    }
+  } else {
+    job.status = outcome;
+    job.requiredInput = outcome === "waiting_input"
+      ? String(input.requiredInput || "需要人工提供下一步输入").trim().slice(0, 500)
+      : "";
+  }
+  job.audit = [...(job.audit || []), { at: now, type: "stage_recorded", stage, outcome, owner }].slice(-1000);
+  return job;
+}
+
+function paginate(items, page, pageSize) {
+  const safeSize = Math.min(Math.max(asNumber(pageSize, 20), 1), 100);
+  const total = items.length;
+  const pages = Math.max(Math.ceil(total / safeSize), 1);
+  const safePage = Math.min(Math.max(asNumber(page, 1), 1), pages);
+  const start = (safePage - 1) * safeSize;
+  return { items: items.slice(start, start + safeSize), page: safePage, pageSize: safeSize, pages, total };
+}
+
+function filterBuyers(model, query) {
+  let items = model.buyers;
+  const text = normalize(query.get("q"));
+  const country = normalize(query.get("country"));
+  const confidence = query.get("confidence") || "";
+  const status = query.get("status") || "";
+  if (text) items = items.filter((item) => normalize(`${item.buyer} ${item.matchedCompany} ${item.website}`).includes(text));
+  if (country) items = items.filter((item) => normalize(item.country) === country);
+  if (confidence) items = items.filter((item) => item.matchConfidence === confidence);
+  if (status) items = items.filter((item) => item.enrichmentStatus === status);
+  return paginate(items, query.get("page"), query.get("pageSize"));
+}
+
+function filterContacts(model, query) {
+  let items = model.contacts;
+  const text = normalize(query.get("q"));
+  const buyer = normalize(query.get("buyer"));
+  const priority = query.get("priority") || "";
+  const confidence = query.get("confidence") || "";
+  const validation = query.get("validation") || "";
+  const dedupe = query.get("dedupe") || "first";
+  const emailOnly = query.get("emailOnly") === "true";
+  if (text) items = items.filter((item) => normalize(`${item.name} ${item.title} ${item.email} ${item.rawBuyerName} ${item.matchedCompany}`).includes(text));
+  if (buyer) items = items.filter((item) => normalize(item.rawBuyerName) === buyer);
+  if (priority) items = items.filter((item) => item.priority === priority);
+  if (confidence) items = items.filter((item) => item.matchConfidence === confidence);
+  if (validation) items = items.filter((item) => item.validationStatus === validation);
+  if (dedupe === "first") items = items.filter((item) => !item.duplicate);
+  if (emailOnly) items = items.filter((item) => item.email && !item.duplicateEmail);
+  return paginate(items, query.get("page"), query.get("pageSize"));
+}
+
+function buildQualityReport(model) {
+  const buyers = model.buyers;
+  const contacts = model.contacts;
+  const emailContacts = contacts.filter((item) => item.email);
+  const accessible = contacts.filter((item) => item.contactable);
+  const invalidEmailFormat = emailContacts.filter((item) => !validEmail(item.email));
+  const blankName = contacts.filter((item) => !item.name && item.contactable);
+  const missingCompany = contacts.filter((item) => !item.matchedCompany && item.contactable);
+  const lowConfidence = contacts.filter((item) => !item.matchConfidence || !item.matchedCompany);
+  const pendingBuyers = buyers.filter((item) => !item.matchedCompany);
+  const confidenceCounts = buyers.reduce((counts, item) => {
+    const key = item.matchConfidence || "未匹配";
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+  const validationCounts = contacts.reduce((counts, item) => {
+    const key = item.validationStatus || "unknown";
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+  const suppressed = contacts.filter((item) => item.suppressed);
+  const issues = [];
+  const addIssue = (severity, code, count, message, action) => {
+    if (count > 0) issues.push({ severity, code, count, message, action });
+  };
+  addIssue("high", "pending_buyer_enrichment", pendingBuyers.length,
+    "仍有买家没有完成公司匹配和联系方式补全。", "继续队列 B，但保持买家搜索预算与联系方式预算分开。");
+  addIssue("high", "unverified_email", validationCounts.unverified || 0,
+    "邮箱只完成采集，尚未证明可投递。", "在进入 approved_recipient 前完成语法、域名/MX或人工验证。");
+  addIssue("medium", "invalid_email_format", invalidEmailFormat.length,
+    "邮箱字符串不符合基础格式。", "禁止进入发送候选，保留原始值并标记 invalid_format。");
+  addIssue("medium", "blank_contact_name", blankName.length,
+    "可联系记录缺少人物姓名，可能是公司级联系方式。", "放入公司联系方式表，不要用空白姓名占据人物联系人表。");
+  addIssue("medium", "missing_matched_company", missingCompany.length,
+    "联系方式缺少已匹配的买家公司。", "回到公司匹配阶段，保留原始买家名称，不强行归属。");
+  addIssue("low", "duplicate_contact_link", model.summary.duplicateLinks,
+    "存在重复联系方式关联。", "按公司、邮箱、电话和LinkedIn去重；同名不足以合并人物。");
+  addIssue("low", "low_confidence_match", lowConfidence.length,
+    "低置信公司匹配记录仍在数据池中。", "保留为待复核候选，不进入默认触达名单。");
+
+  return {
+    generatedAt: new Date().toISOString(),
+    source: {
+      retrievalDate: model.summary.retrievalDate,
+      supplierQuery: model.summary.supplierQuery,
+      buyerCount: model.summary.buyerCount,
+    },
+    metrics: {
+      buyers: buyers.length,
+      buyersEnriched: buyers.length - pendingBuyers.length,
+      buyersPendingEnrichment: pendingBuyers.length,
+      contactsExtracted: contacts.length,
+      contactsAccessible: accessible.length,
+      uniqueContacts: model.summary.uniqueContacts,
+      uniqueEmails: model.summary.uniqueEmails,
+      uniquePhones: model.summary.uniquePhones,
+      duplicateLinks: model.summary.duplicateLinks,
+      invalidEmailFormat: invalidEmailFormat.length,
+      blankContactName: blankName.length,
+      missingMatchedCompany: missingCompany.length,
+      confidenceCounts,
+      validationCounts,
+      suppressedContacts: suppressed.length,
+      localValidationRecords: (validationStore.records || []).length,
+      suppressionRecords: (suppressionStore.records || []).length,
+    },
+    issues,
+    safeToSend: false,
+    safeToSendReason: "当前数据池的邮箱默认是unverified；本地质量报告不会替代投递验证、在职确认、退订检查或人工审核。",
+  };
+}
+
+function campaignRecipients(model, campaign) {
+  const filters = campaign.filters || {};
+  let items = model.contacts.filter((item) => item.email && !item.duplicateEmail && !item.suppressed && !isSuppressed(item.email));
+  if (filters.countries?.length) items = items.filter((item) => filters.countries.includes(item.country));
+  if (filters.confidences?.length) items = items.filter((item) => filters.confidences.includes(item.matchConfidence));
+  if (filters.priorities?.length) items = items.filter((item) => filters.priorities.includes(item.priority));
+  if (!filters.includeLowConfidence) items = items.filter((item) => confidenceRank[item.matchConfidence] >= 1);
+  return items;
+}
+
+function renderTemplate(template, recipient) {
+  const firstName = recipient.name?.split(/\s+/)[0] || "there";
+  const replacements = {
+    "{{first_name}}": firstName,
+    "{{full_name}}": recipient.name || "there",
+    "{{company}}": recipient.matchedCompany || recipient.rawBuyerName,
+    "{{buyer_name}}": recipient.rawBuyerName,
+    "{{country}}": recipient.country,
+    "{{role}}": recipient.title || "your team",
+  };
+  return Object.entries(replacements).reduce((value, [token, replacement]) => value.split(token).join(replacement), String(template || ""));
+}
+
+function clipText(value, maximum = MAX_AI_CONTEXT_CHARS) {
+  return String(value || "").trim().slice(0, maximum);
+}
+
+function extractResponseText(response) {
+  if (typeof response?.output_text === "string") return response.output_text;
+  return (response?.output || [])
+    .flatMap((item) => item?.content || [])
+    .filter((item) => item?.type === "output_text" && typeof item.text === "string")
+    .map((item) => item.text)
+    .join("\n");
+}
+
+function parseAiDraft(rawText) {
+  const cleaned = String(rawText || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw Object.assign(new Error("模型没有返回有效的JSON邮件草稿"), { status: 502 });
+  }
+  const subject = clipText(parsed.subject, 240);
+  const body = clipText(parsed.body, 12000);
+  if (!subject || !body) throw Object.assign(new Error("模型返回的主题或正文为空"), { status: 502 });
+  return { subject, body };
+}
+
+function englishWordCount(value) {
+  return (String(value || "").match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g) || []).length;
+}
+
+function contactFirstName(value) {
+  const name = clipText(value, 200);
+  if (!name || name === "{{first_name}}") return "{{first_name}}";
+  const parts = name.split(/\s+/).filter(Boolean);
+  while (parts.length > 1 && /^(mr|mrs|ms|miss|dr|prof)\.?$/i.test(parts[0])) parts.shift();
+  return parts[0] || name;
+}
+
+function enforceGreeting(body, firstName) {
+  const greeting = `Hi ${firstName || "{{first_name}}"},`;
+  const text = String(body || "").trim();
+  if (/^Hi\s+[^\n,]+,/i.test(text)) return text.replace(/^Hi\s+[^\n,]+,/i, greeting);
+  return `${greeting}\n\n${text}`;
+}
+
+async function requestAiDraftCompletion(instructions, facts, revisionRequest = "") {
+  let response;
+  try {
+    response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        reasoning: { effort: "none" },
+        max_output_tokens: 700,
+        instructions,
+        input: `Create one outreach email from these facts:\n${JSON.stringify({
+          ...facts,
+          ...(revisionRequest ? { revision_request: revisionRequest } : {}),
+        }, null, 2)}`,
+      }),
+      signal: AbortSignal.timeout(45000),
+    });
+  } catch (error) {
+    const message = clipText(error.message || "network_error", 500);
+    await updateAiRuntime({ reachable: false, lastError: message });
+    throw Object.assign(new Error(`OpenAI网络不可达：${message}`), { status: 502 });
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const providerMessage = clipText(payload?.error?.message || `HTTP ${response.status}`, 500);
+    await updateAiRuntime({ reachable: true, lastError: providerMessage });
+    throw Object.assign(new Error(`OpenAI请求失败：${providerMessage}`), { status: 502 });
+  }
+  return { payload, draft: parseAiDraft(extractResponseText(payload)) };
+}
+
+function scenarioValidationErrors(scenario, brief) {
+  const labels = {
+    hsCode: "HSCode",
+    productFocus: "产品方向",
+    buyerEvidence: "采购商业务证据",
+    eventName: "展会名称",
+    eventDates: "展会日期",
+    eventBooth: "展位号",
+    eventAddress: "展会地址",
+    meetingLocation: "约见地点",
+  };
+  return scenario.requiredFields
+    .filter((field) => !String(brief[field] || "").trim())
+    .map((field) => `缺少${labels[field] || field}`);
+}
+
+function claimViolations(text, approvedClaimIds) {
+  const approved = new Set(approvedClaimIds || []);
+  return GUARDED_CLAIMS
+    .filter((claim) => !approved.has(claim.id) && claim.pattern.test(String(text || "")))
+    .map((claim) => claim.label);
+}
+
+async function generateAiDraft(input) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw Object.assign(new Error("OPENAI_API_KEY尚未配置"), { status: 503 });
+  }
+
+  const tradeContent = clipText(input.buyerEvidence || input.tradeContent);
+  const companyBusiness = clipText(input.companyBusiness);
+  if (!tradeContent || !companyBusiness) {
+    throw Object.assign(new Error("贸易内容和我方业务说明不能为空"), { status: 422 });
+  }
+
+  const scenario = SCENARIO_BY_ID.get(String(input.scenario || "first_touch")) || SCENARIO_BY_ID.get("first_touch");
+  const brief = {
+    hsCode: clipText(input.hsCode, 40),
+    productFocus: clipText(input.productFocus, 500),
+    buyerEvidence: tradeContent,
+    eventName: clipText(input.eventName, 300),
+    eventDates: clipText(input.eventDates, 200),
+    eventBooth: clipText(input.eventBooth, 120),
+    eventAddress: clipText(input.eventAddress, 500),
+    meetingLocation: clipText(input.meetingLocation, 500),
+  };
+  const validationErrors = scenarioValidationErrors(scenario, brief);
+  if (validationErrors.length) {
+    throw Object.assign(new Error(`场景资料不完整：${validationErrors.join("、")}`), { status: 422 });
+  }
+
+  const approvedClaimIds = [...new Set((Array.isArray(input.approvedClaims) ? input.approvedClaims : [])
+    .map((item) => String(item))
+    .filter((item) => CLAIM_BY_ID.has(item)))];
+  const selectedAssetIds = [...new Set((Array.isArray(input.assetIds) ? input.assetIds : [])
+    .map((item) => String(item))
+    .filter((item) => ASSET_BY_ID.has(item)))].slice(0, scenario.maxAssets);
+  if (selectedAssetIds.length && !input.assetRightsConfirmed) {
+    throw Object.assign(new Error("选择配图后必须确认对外使用权"), { status: 422 });
+  }
+  const missingAssetClaims = selectedAssetIds
+    .map((id) => ASSET_BY_ID.get(id))
+    .filter((asset) => asset.requiredClaim && !approvedClaimIds.includes(asset.requiredClaim))
+    .map((asset) => asset.label);
+  if (missingAssetClaims.length) {
+    throw Object.assign(new Error(`配图尚未完成对外使用批准：${missingAssetClaims.join("、")}`), { status: 422 });
+  }
+
+  const approvedClaims = approvedClaimIds.map((id) => CLAIM_BY_ID.get(id).text);
+  const selectedAssets = selectedAssetIds.map((id) => {
+    const asset = ASSET_BY_ID.get(id);
+    return { id: asset.id, label: asset.label };
+  });
+
+  const facts = {
+    scenario: scenario.id,
+    scenario_goal: scenario.goal,
+    target_word_range: scenario.wordRange,
+    hs_code_for_internal_matching_only: brief.hsCode,
+    product_focus: brief.productFocus,
+    buyer_company: clipText(input.buyerCompany, 300) || "{{company}}",
+    buyer_country: clipText(input.buyerCountry, 120),
+    contact_full_name: clipText(input.contactName, 200),
+    contact_first_name: contactFirstName(input.contactName),
+    contact_role: clipText(input.contactRole, 200),
+    verified_buyer_evidence: brief.buyerEvidence,
+    sender_company: clipText(input.senderCompany, 200) || "Dakings",
+    sender_name: clipText(input.senderName, 120),
+    sender_title: clipText(input.senderTitle, 160),
+    sender_email: clipText(input.senderEmail, 320),
+    sender_phone: clipText(input.senderPhone, 120),
+    sender_website: clipText(input.senderWebsite, 320),
+    sender_business: companyBusiness,
+    avoid_subjects: (Array.isArray(input.avoidSubjects) ? input.avoidSubjects : []).map((item) => clipText(item, 240)).filter(Boolean).slice(-10),
+    approved_optional_claims: approvedClaims,
+    selected_inline_assets: selectedAssets,
+    template_version: EMAIL_TEMPLATE_LIBRARY.version,
+    template_global_rules: EMAIL_TEMPLATE_LIBRARY.globalRules,
+    template_scenario_blueprint: EMAIL_TEMPLATE_LIBRARY.scenarios[scenario.id],
+    event: {
+      name: brief.eventName,
+      dates: brief.eventDates,
+      booth: brief.eventBooth,
+      address: brief.eventAddress,
+      meeting_location: brief.meetingLocation,
+    },
+    desired_language: clipText(input.language, 40) || "English",
+    tone: clipText(input.tone, 80) || "concise and professional",
+  };
+
+  const instructions = [
+    "You write permission-based B2B trade outreach emails.",
+    "Use only facts supplied by the user. Never invent certifications, clients, prices, shipment history, capabilities, or relationship claims.",
+    "Treat the supplied template as a structural blueprint, not text to copy. Correct the source style into natural business English.",
+    "Follow the supplied scenario goal and target word range. Use one specific buyer-relevance sentence and one low-pressure call to action.",
+    "The HS code is internal matching context. Never mention the HS code, customs records, import data, scraping, or how the buyer was discovered.",
+    "Adapt the value proposition and call to action to the contact role. Procurement may receive a quotation/RFQ ask; logistics may receive pack-out or delivery questions; editorial may receive format and finishing questions.",
+    "Start with Hi plus contact_first_name. Never greet a named contact with their full name. Do not use How are you, dear, long-time admirer language, fake familiarity, or unsupported praise.",
+    "Write a 4-8 word subject adapted to the contact role and product relevance. Do not repeat any subject in avoid_subjects.",
+    "Only use optional claims listed under approved_optional_claims. If selected_inline_assets is empty, do not mention attached or included images.",
+    "For exhibition scenarios, include only the supplied event details and ask for a specific short meeting window or reply.",
+    "Preserve {{first_name}} and {{company}} exactly when they appear.",
+    "Do not use hype, false urgency, tracking claims, deceptive subject lines, multiple calls to action, or more than one exclamation mark.",
+    "End with a compact signature using only the supplied sender fields. Do not invent a title, phone number, email address, or website.",
+    "Return only valid JSON with exactly two string fields: subject and body.",
+  ].join(" ");
+
+  const attemptedAt = new Date().toISOString();
+  await updateAiRuntime({ lastAttemptAt: attemptedAt, lastError: "" });
+  let { payload, draft } = await requestAiDraftCompletion(instructions, facts);
+  draft.body = enforceGreeting(draft.body, facts.contact_first_name);
+  let wordCount = englishWordCount(draft.body);
+  let rewrittenForLength = false;
+  if (wordCount < scenario.wordRange[0] || wordCount > scenario.wordRange[1]) {
+    await delay(AI_MIN_INTERVAL_MS);
+    ({ payload, draft } = await requestAiDraftCompletion(
+      instructions,
+      facts,
+      `Rewrite the email once so the body is ${scenario.wordRange[0]}-${scenario.wordRange[1]} English words, while preserving the same verified facts and exactly one call to action.`,
+    ));
+    draft.body = enforceGreeting(draft.body, facts.contact_first_name);
+    wordCount = englishWordCount(draft.body);
+    rewrittenForLength = true;
+  }
+  const violations = claimViolations(`${draft.subject}\n${draft.body}`, approvedClaimIds);
+  if (violations.length) {
+    throw Object.assign(new Error(`模型草稿包含未批准卖点：${violations.join("、")}`), { status: 502 });
+  }
+  const warnings = [];
+  if (wordCount < scenario.wordRange[0] || wordCount > scenario.wordRange[1]) {
+    warnings.push(`正文${wordCount}词，建议范围${scenario.wordRange[0]}-${scenario.wordRange[1]}词`);
+  }
+  if (/\bHS\s*Code\b|customs?|import records?/i.test(draft.body)) warnings.push("正文不应暴露HSCode或海关数据来源");
+  await updateAiRuntime({ reachable: true, lastSuccessAt: new Date().toISOString(), lastError: "" });
+  return {
+    ...draft,
+    model: payload.model || OPENAI_MODEL,
+    scenario: scenario.id,
+    wordCount,
+    warnings,
+    assetIds: selectedAssetIds,
+    templateVersion: EMAIL_TEMPLATE_LIBRARY.version,
+    rewrittenForLength,
+  };
+}
+
+function validEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
+}
+
+function sendableRecipients(model, campaign) {
+  const delivered = new Set(campaign?.delivery?.recipientHashes || []);
+  const lockedOutboxRecipients = new Set((outboxStore.entries || [])
+    .filter((entry) => entry.campaignId === campaign?.id && ["sending", "accepted", "uncertain"].includes(entry.status))
+    .map((entry) => entry.recipientHash));
+  return campaignRecipients(model, campaign).filter((recipient) => (
+    validEmail(recipient.email)
+    && !isSuppressed(recipient.email)
+    && recipient.validationStatus !== "invalid"
+    && recipient.validationStatus !== "opted_out"
+    && (recipient.validationStatus === "deliverable" || deliveryConfig.allowUnverified)
+    && !delivered.has(stableId("delivery", normalize(recipient.email)))
+    && !lockedOutboxRecipients.has(emailFingerprint(recipient.email))
+  ));
+}
+
+function sendReadiness(model, campaign) {
+  const errors = [];
+  if (!deliveryConfig.enabled) errors.push("EMAIL_SENDING_ENABLED未开启");
+  if (!isSmtpConfigured()) errors.push("SMTP配置不完整");
+  if (!deliveryConfig.unsubscribeUrl) errors.push("缺少退订地址");
+  if (!deliveryConfig.physicalAddress) errors.push("缺少发件方实体地址");
+  if (!campaign || !["approved", "partially_sent"].includes(campaign.status)) errors.push("活动尚未进入已批准发送状态");
+  if (campaign) {
+    errors.push(...campaignContentErrors(campaign));
+    const checks = campaign.compliance || {};
+    if (!checks.senderDomainVerified) errors.push("发件域名未确认");
+    if (!checks.unsubscribeConfigured) errors.push("退订机制未确认");
+    if (!checks.physicalAddressConfigured) errors.push("实体地址未确认");
+    if (!checks.suppressionListChecked) errors.push("抑制名单未检查");
+    if (!sendableRecipients(model, campaign).length) errors.push("没有通过发送门槛的收件人");
+  }
+  return { ready: errors.length === 0, errors };
+}
+
+function sanitizeHeader(value) {
+  return String(value || "").replace(/[\r\n]+/g, " ").trim();
+}
+
+function encodeHeader(value) {
+  const clean = sanitizeHeader(value);
+  return /^[\x20-\x7E]*$/.test(clean) ? clean : `=?UTF-8?B?${Buffer.from(clean).toString("base64")}?=`;
+}
+
+function base64Lines(value) {
+  return Buffer.from(value).toString("base64").match(/.{1,76}/g)?.join("\r\n") || "";
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+async function buildEmailMessage({ to, subject, body, assetIds = [], messageId = "" }) {
+  const safeFrom = sanitizeHeader(deliveryConfig.from);
+  const safeTo = sanitizeHeader(to);
+  const footer = [
+    "",
+    "---",
+    `Unsubscribe: ${deliveryConfig.unsubscribeUrl}`,
+    deliveryConfig.physicalAddress,
+  ].join("\n");
+  const plainText = `${body.trim()}${footer}`;
+  const selectedAssets = [...new Set(assetIds)]
+    .map((id) => ASSET_BY_ID.get(id))
+    .filter(Boolean)
+    .slice(0, 2);
+  const headers = [
+    `From: ${safeFrom}`,
+    `To: ${safeTo}`,
+    `Subject: ${encodeHeader(subject)}`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: <${sanitizeHeader(messageId || `${crypto.randomUUID()}@${deliveryConfig.host}`)}>`,
+    "MIME-Version: 1.0",
+    `List-Unsubscribe: <${sanitizeHeader(deliveryConfig.unsubscribeUrl)}>`,
+  ];
+  if (!selectedAssets.length) {
+    return [
+      ...headers,
+      "Content-Type: text/plain; charset=UTF-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      base64Lines(Buffer.from(plainText, "utf8")),
+    ].join("\r\n");
+  }
+
+  const relatedBoundary = `rel_${crypto.randomUUID().replaceAll("-", "")}`;
+  const alternativeBoundary = `alt_${crypto.randomUUID().replaceAll("-", "")}`;
+  const images = selectedAssets.map((asset, index) => ({ ...asset, cid: `dakings_asset_${index + 1}` }));
+  const htmlBody = escapeHtml(body.trim()).replace(/\r?\n/g, "<br>");
+  const htmlFooter = [
+    `<p style="margin:24px 0 0;color:#66706e;font-size:12px;line-height:1.5;border-top:1px solid #e3e8e6;padding-top:12px">`,
+    `Unsubscribe: <a href="${escapeHtml(deliveryConfig.unsubscribeUrl)}">${escapeHtml(deliveryConfig.unsubscribeUrl)}</a><br>`,
+    `${escapeHtml(deliveryConfig.physicalAddress)}</p>`,
+  ].join("");
+  const htmlImages = images.map((asset) => (
+    `<figure style="margin:18px 0 0"><img src="cid:${asset.cid}" alt="${escapeHtml(asset.label)}" style="display:block;max-width:560px;width:100%;height:auto;border:0"><figcaption style="margin-top:6px;color:#66706e;font-size:12px">${escapeHtml(asset.label)}</figcaption></figure>`
+  )).join("");
+  const html = `<!doctype html><html><body style="margin:0;padding:0;font-family:Arial,sans-serif;color:#1f2928;font-size:15px;line-height:1.6"><div style="max-width:600px;margin:0 auto;padding:24px">${htmlBody}${htmlImages}${htmlFooter}</div></body></html>`;
+  const parts = [
+    ...headers,
+    `Content-Type: multipart/related; boundary="${relatedBoundary}"`,
+    "",
+    `--${relatedBoundary}`,
+    `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
+    "",
+    `--${alternativeBoundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64Lines(Buffer.from(plainText, "utf8")),
+    `--${alternativeBoundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64Lines(Buffer.from(html, "utf8")),
+    `--${alternativeBoundary}--`,
+  ];
+  for (const asset of images) {
+    const bytes = await fs.readFile(path.join(publicDir, asset.file));
+    parts.push(
+      `--${relatedBoundary}`,
+      `Content-Type: image/jpeg; name="${asset.id}.jpg"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-ID: <${asset.cid}>`,
+      `Content-Disposition: inline; filename="${asset.id}.jpg"`,
+      "",
+      base64Lines(bytes),
+    );
+  }
+  parts.push(`--${relatedBoundary}--`);
+  return parts.join("\r\n");
+}
+
+function waitForSocket(socket, eventName) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      socket.off(eventName, onReady);
+      socket.off("error", onError);
+    };
+    const onReady = () => { cleanup(); resolve(); };
+    const onError = (error) => { cleanup(); reject(error); };
+    socket.once(eventName, onReady);
+    socket.once("error", onError);
+  });
+}
+
+function readSmtpResponse(socket) {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    const timeout = setTimeout(() => finish(new Error("SMTP响应超时")), 15000);
+    const finish = (error, result) => {
+      clearTimeout(timeout);
+      socket.off("data", onData);
+      socket.off("error", onError);
+      socket.off("close", onClose);
+      if (error) reject(error); else resolve(result);
+    };
+    const onError = (error) => finish(error);
+    const onClose = () => finish(new Error("SMTP连接意外关闭"));
+    const onData = (chunk) => {
+      buffer += chunk.toString("utf8");
+      const lines = buffer.split(/\r?\n/).filter(Boolean);
+      const last = lines.at(-1) || "";
+      const match = last.match(/^(\d{3})\s/);
+      if (match) finish(null, { code: Number(match[1]), text: buffer });
+    };
+    socket.on("data", onData);
+    socket.once("error", onError);
+    socket.once("close", onClose);
+  });
+}
+
+async function smtpCommand(socket, command, expectedCodes) {
+  const responsePromise = readSmtpResponse(socket);
+  if (command !== null) socket.write(`${command}\r\n`);
+  const response = await responsePromise;
+  if (!expectedCodes.includes(response.code)) {
+    throw new Error(`SMTP命令失败（${response.code}）`);
+  }
+  return response;
+}
+
+async function sendSmtpMessage(message) {
+  let socket;
+  let dataSubmitted = false;
+  if (deliveryConfig.secure) {
+    socket = tls.connect({
+      host: deliveryConfig.host,
+      port: deliveryConfig.port,
+      servername: deliveryConfig.host,
+      rejectUnauthorized: deliveryConfig.rejectUnauthorized,
+    });
+    await waitForSocket(socket, "secureConnect");
+  } else {
+    socket = net.connect({ host: deliveryConfig.host, port: deliveryConfig.port });
+    await waitForSocket(socket, "connect");
+  }
+
+  try {
+    await smtpCommand(socket, null, [220]);
+    await smtpCommand(socket, `EHLO ${host}`, [250]);
+    if (!deliveryConfig.secure && deliveryConfig.startTls) {
+      await smtpCommand(socket, "STARTTLS", [220]);
+      socket = tls.connect({
+        socket,
+        servername: deliveryConfig.host,
+        rejectUnauthorized: deliveryConfig.rejectUnauthorized,
+      });
+      await waitForSocket(socket, "secureConnect");
+      await smtpCommand(socket, `EHLO ${host}`, [250]);
+    }
+    if (!socket.encrypted && !deliveryConfig.allowInsecureAuth) {
+      throw new Error("拒绝在未加密SMTP连接上提交账号密码");
+    }
+    await smtpCommand(socket, "AUTH LOGIN", [334]);
+    await smtpCommand(socket, Buffer.from(deliveryConfig.user).toString("base64"), [334]);
+    await smtpCommand(socket, Buffer.from(deliveryConfig.pass).toString("base64"), [235]);
+    await smtpCommand(socket, `MAIL FROM:<${sanitizeHeader(deliveryConfig.from).replace(/^.*<|>.*$/g, "")}>`, [250]);
+    await smtpCommand(socket, `RCPT TO:<${sanitizeHeader(message.to)}>`, [250, 251]);
+    await smtpCommand(socket, "DATA", [354]);
+    const emailMessage = await buildEmailMessage(message);
+    const responsePromise = readSmtpResponse(socket);
+    dataSubmitted = true;
+    socket.write(`${emailMessage.replace(/^\./gm, "..")}\r\n.\r\n`);
+    const accepted = await responsePromise;
+    if (accepted.code !== 250) {
+      const error = new Error(`SMTP邮件未被接受（${accepted.code}）`);
+      error.deliveryUncertain = false;
+      throw error;
+    }
+    await smtpCommand(socket, "QUIT", [221]);
+    return { accepted: true, response: clipText(accepted.text, 500), messageId: message.messageId };
+  } catch (error) {
+    if (error.deliveryUncertain === undefined) error.deliveryUncertain = dataSubmitted;
+    throw error;
+  } finally {
+    socket.destroy();
+  }
+}
+
+function outboxPublicSummary() {
+  const entries = outboxStore.entries || [];
+  const statuses = ["pending", "sending", "accepted", "failed", "uncertain"];
+  return {
+    counts: Object.fromEntries(statuses.map((status) => [status, entries.filter((entry) => entry.status === status).length])),
+    items: entries.slice(-200).reverse().map((entry) => ({
+      id: entry.id,
+      campaignId: entry.campaignId,
+      recipientFingerprint: publicFingerprint(entry.recipientHash),
+      status: entry.status,
+      attempts: entry.attempts,
+      messageId: entry.messageId,
+      lastError: entry.lastError,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      events: (entry.events || []).slice(-20),
+    })),
+  };
+}
+
+async function prepareOutboxEntry(campaign, recipient) {
+  const idempotencyKey = stableId("outbox", campaign.id, normalize(recipient.email));
+  let entry = (outboxStore.entries || []).find((item) => item.idempotencyKey === idempotencyKey);
+  if (entry && ["sending", "accepted", "uncertain"].includes(entry.status)) {
+    throw Object.assign(new Error(`发件箱状态为${entry.status}，禁止自动重试`), { status: 409 });
+  }
+  const now = new Date().toISOString();
+  if (!entry) {
+    entry = {
+      id: `out_${crypto.randomUUID()}`,
+      idempotencyKey,
+      campaignId: campaign.id,
+      recipientId: recipient.id,
+      recipientHash: emailFingerprint(recipient.email),
+      status: "pending",
+      attempts: 0,
+      messageId: `${crypto.randomUUID()}@${sanitizeHeader(deliveryConfig.host)}`,
+      providerResponse: "",
+      lastError: "",
+      createdAt: now,
+      updatedAt: now,
+      events: [{ at: now, status: "pending", type: "outbox_created" }],
+    };
+    outboxStore.entries.push(entry);
+  } else {
+    entry.status = "pending";
+    entry.updatedAt = now;
+    entry.lastError = "";
+    entry.messageId = `${crypto.randomUUID()}@${sanitizeHeader(deliveryConfig.host)}`;
+    entry.events = [...(entry.events || []), { at: now, status: "pending", type: "retry_prepared" }].slice(-100);
+  }
+  await writeJsonStore(outboxPath, outboxStore);
+  return entry;
+}
+
+async function transitionOutbox(entry, status, details = {}) {
+  const now = new Date().toISOString();
+  entry.status = status;
+  entry.updatedAt = now;
+  if (status === "sending") entry.attempts = Number(entry.attempts || 0) + 1;
+  if (details.providerResponse !== undefined) entry.providerResponse = clipText(details.providerResponse, 500);
+  if (details.lastError !== undefined) entry.lastError = clipText(details.lastError, 500);
+  entry.events = [...(entry.events || []), { at: now, status, type: details.type || `delivery_${status}` }].slice(-100);
+  await writeJsonStore(outboxPath, outboxStore);
+  return entry;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function campaignWithMetrics(model, campaign) {
+  const recipients = campaignRecipients(model, campaign);
+  const readiness = sendReadiness(model, campaign);
+  return {
+    ...campaign,
+    estimatedRecipients: recipients.length,
+    unverifiedRecipients: recipients.filter((item) => item.validationStatus === "unverified").length,
+    sendableRecipients: sendableRecipients(model, campaign).length,
+    sendingLocked: !readiness.ready,
+    sendBlockers: readiness.errors,
+  };
+}
+
+function json(res, status, payload) {
+  const body = JSON.stringify(payload);
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
+    "Cache-Control": "no-store",
+  });
+  res.end(body);
+}
+
+function text(res, status, payload, contentType = "text/plain; charset=utf-8") {
+  res.writeHead(status, { "Content-Type": contentType, "Content-Length": Buffer.byteLength(payload) });
+  res.end(payload);
+}
+
+async function parseBody(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_BODY_BYTES) throw Object.assign(new Error("请求体过大"), { status: 413 });
+    chunks.push(chunk);
+  }
+  if (!chunks.length) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw Object.assign(new Error("JSON格式无效"), { status: 400 });
+  }
+}
+
+function cleanCampaignInput(input) {
+  const cleanArray = (value) => (Array.isArray(value) ? value.map((item) => String(item).slice(0, 120)).slice(0, 50) : []);
+  const scenario = SCENARIO_BY_ID.get(String(input.brief?.scenario || "first_touch")) || SCENARIO_BY_ID.get("first_touch");
+  const approvedClaims = [...new Set(cleanArray(input.approvedClaims).filter((id) => CLAIM_BY_ID.has(id)))];
+  const assetIds = [...new Set(cleanArray(input.assetIds).filter((id) => ASSET_BY_ID.has(id)))].slice(0, scenario.maxAssets);
+  return {
+    name: String(input.name || "未命名活动").trim().slice(0, 120),
+    subject: String(input.subject || "").trim().slice(0, 240),
+    body: String(input.body || "").trim().slice(0, 12000),
+    brief: {
+      scenario: scenario.id,
+      hsCode: String(input.brief?.hsCode || "").trim().slice(0, 40),
+      productFocus: String(input.brief?.productFocus || "").trim().slice(0, 500),
+      buyerEvidence: String(input.brief?.buyerEvidence || "").trim().slice(0, MAX_AI_CONTEXT_CHARS),
+      contactRole: String(input.brief?.contactRole || "").trim().slice(0, 200),
+      eventName: String(input.brief?.eventName || "").trim().slice(0, 300),
+      eventDates: String(input.brief?.eventDates || "").trim().slice(0, 200),
+      eventBooth: String(input.brief?.eventBooth || "").trim().slice(0, 120),
+      eventAddress: String(input.brief?.eventAddress || "").trim().slice(0, 500),
+      meetingLocation: String(input.brief?.meetingLocation || "").trim().slice(0, 500),
+    },
+    approvedClaims,
+    assetIds,
+    assetRightsConfirmed: Boolean(input.assetRightsConfirmed),
+    filters: {
+      countries: cleanArray(input.filters?.countries),
+      confidences: cleanArray(input.filters?.confidences),
+      priorities: cleanArray(input.filters?.priorities),
+      includeLowConfidence: Boolean(input.filters?.includeLowConfidence),
+    },
+    compliance: {
+      senderDomainVerified: Boolean(input.compliance?.senderDomainVerified),
+      unsubscribeConfigured: Boolean(input.compliance?.unsubscribeConfigured),
+      physicalAddressConfigured: Boolean(input.compliance?.physicalAddressConfigured),
+      suppressionListChecked: Boolean(input.compliance?.suppressionListChecked),
+    },
+  };
+}
+
+function campaignContentErrors(campaign) {
+  const errors = [];
+  const scenario = SCENARIO_BY_ID.get(campaign.brief?.scenario || "first_touch") || SCENARIO_BY_ID.get("first_touch");
+  const brief = campaign.brief || {};
+  if (!campaign.subject) errors.push("缺少邮件主题");
+  if (!campaign.body) errors.push("缺少邮件正文");
+  errors.push(...scenarioValidationErrors(scenario, brief));
+  const approvedClaims = campaign.approvedClaims || [];
+  const violations = claimViolations(`${campaign.subject || ""}\n${campaign.body || ""}`, approvedClaims);
+  if (violations.length) errors.push(`正文包含未批准卖点：${violations.join("、")}`);
+  const assetIds = (campaign.assetIds || []).filter((id) => ASSET_BY_ID.has(id));
+  if (assetIds.length > scenario.maxAssets) errors.push(`当前场景最多允许${scenario.maxAssets}张配图`);
+  if (assetIds.length && !campaign.assetRightsConfirmed) errors.push("配图对外使用权尚未确认");
+  const missingAssetClaims = assetIds
+    .map((id) => ASSET_BY_ID.get(id))
+    .filter((asset) => asset.requiredClaim && !approvedClaims.includes(asset.requiredClaim))
+    .map((asset) => asset.label);
+  if (missingAssetClaims.length) errors.push(`配图尚未完成卖点批准：${missingAssetClaims.join("、")}`);
+  const wordCount = englishWordCount(campaign.body);
+  if (campaign.body && (wordCount < scenario.wordRange[0] || wordCount > scenario.wordRange[1])) {
+    errors.push(`正文${wordCount}词，需控制在${scenario.wordRange[0]}-${scenario.wordRange[1]}词`);
+  }
+  if (/\bHS\s*Code\b|customs?|import records?/i.test(campaign.body || "")) errors.push("正文不得暴露HSCode或海关数据来源");
+  return [...new Set(errors)];
+}
+
+function isStoreMutationRequest(method, pathname) {
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(method)) return false;
+  return /^\/api\/(contact-quality|suppressions|ops\/tasks|contact-queues|pipeline|outbox|campaigns)(?:\/|$)/.test(pathname);
+}
+
+async function apiHandler(req, res, url, model) {
+  const pathname = url.pathname;
+  const isBackupMerge = req.method === "POST" && pathname === "/api/local-backup/merge";
+  if (isBackupMerge) {
+    if (backupMergeInFlight || activeStoreMutations > 0) {
+      return json(res, 409, { error: "当前存在本地写入任务，请稍后重试安全合并" });
+    }
+    backupMergeInFlight = true;
+    try {
+      return await apiHandlerUnlocked(req, res, url, model);
+    } finally {
+      backupMergeInFlight = false;
+    }
+  }
+  const isMutation = isStoreMutationRequest(req.method, pathname);
+  if (isMutation && backupMergeInFlight) {
+    return json(res, 503, { error: "控制备份正在安全合并，本次写入已拒绝" });
+  }
+  if (isMutation) activeStoreMutations += 1;
+  try {
+    return await apiHandlerUnlocked(req, res, url, model);
+  } finally {
+    if (isMutation) activeStoreMutations -= 1;
+  }
+}
+
+async function apiHandlerUnlocked(req, res, url, model) {
+  const pathname = url.pathname;
+  if (req.method === "GET" && pathname === "/api/health") {
+    return json(res, 200, {
+      ok: true,
+      sourceLoaded: true,
+      ai: { ...runtimeStateStore.ai, configured: Boolean(process.env.OPENAI_API_KEY), model: OPENAI_MODEL },
+      feedback: {
+        webhookConfigured: Boolean(FEEDBACK_WEBHOOK_SECRET),
+        eventCount: runtimeStateStore.feedback.events.length,
+        lastEventAt: runtimeStateStore.feedback.lastEventAt,
+      },
+      delivery: {
+        enabled: deliveryConfig.enabled,
+        smtpConfigured: isSmtpConfigured(),
+        allowUnverified: deliveryConfig.allowUnverified,
+        batchLimit: deliveryConfig.batchLimit,
+        delayMs: deliveryConfig.delayMs,
+      },
+      localControls: {
+        validationRecords: (validationStore.records || []).length,
+        suppressions: (suppressionStore.records || []).length,
+        operationTasks: (operationsStore.tasks || []).length,
+        contactQueues: (contactCollectionStore.queues || []).length,
+        pipelineJobs: (pipelineStore.jobs || []).length,
+        outboxEntries: (outboxStore.entries || []).length,
+      },
+      sendingEnabled: deliveryConfig.enabled && isSmtpConfigured(),
+      timestamp: new Date().toISOString(),
+    });
+  }
+  if (req.method === "GET" && pathname === "/api/summary") return json(res, 200, model.summary);
+  if (req.method === "GET" && pathname === "/api/quality") return json(res, 200, buildQualityReport(model));
+  if (req.method === "GET" && pathname === "/api/workflow") {
+    return json(res, 200, { items: workflow, sendingEnabled: deliveryConfig.enabled && isSmtpConfigured() });
+  }
+  if (req.method === "GET" && pathname === "/api/buyers") return json(res, 200, filterBuyers(model, url.searchParams));
+  if (req.method === "GET" && pathname === "/api/contacts") return json(res, 200, filterContacts(model, url.searchParams));
+  if (req.method === "GET" && pathname === "/api/local-backup") {
+    return json(res, 200, await createLocalBackup());
+  }
+  if (req.method === "POST" && pathname === "/api/local-backup/validate") {
+    const result = validateLocalBackup(await parseBody(req));
+    return json(res, result.valid ? 200 : 422, result);
+  }
+  if (req.method === "POST" && pathname === "/api/local-backup/preview") {
+    const backup = await parseBody(req);
+    const result = buildBackupMergePlan(backup, await readCampaigns());
+    const { stores, ...publicResult } = result;
+    return json(res, result.valid ? 200 : 422, publicResult);
+  }
+  if (req.method === "POST" && pathname === "/api/local-backup/merge") {
+    const input = await parseBody(req);
+    const backup = input.backup;
+    const plan = buildBackupMergePlan(backup, await readCampaigns());
+    if (!plan.valid) {
+      const { stores, ...publicResult } = plan;
+      return json(res, 422, publicResult);
+    }
+    if (input.confirm !== plan.confirmation) {
+      return json(res, 409, { error: "安全合并确认短语不匹配", expected: plan.confirmation });
+    }
+    const rollbackBackup = await createLocalBackup();
+    const rollbackFile = await commitMergedStores(plan.stores, rollbackBackup);
+    applyLocalContactState(model);
+    return json(res, 200, {
+      merged: true,
+      mode: "current_wins_add_only",
+      added: plan.added,
+      conflicts: plan.conflicts,
+      counts: plan.effective,
+      rollbackFile,
+      safety: "现有记录优先；抑制、任务计数、熔断状态和发送历史不会被备份回滚",
+    });
+  }
+  if (req.method === "GET" && pathname === "/api/contact-quality") {
+    return json(res, 200, publicValidationSummary(model));
+  }
+  if (req.method === "POST" && pathname === "/api/contact-quality/validate") {
+    const input = await parseBody(req);
+    const requestedEmails = Array.isArray(input.emails) ? input.emails : (input.email ? [input.email] : []);
+    const contactIds = new Set(Array.isArray(input.contactIds) ? input.contactIds.map(String) : []);
+    const contactEmails = model.contacts.filter((item) => contactIds.has(item.id)).map((item) => item.email);
+    const emails = [...new Set([...requestedEmails, ...contactEmails].map(normalize).filter(Boolean))].slice(0, 25);
+    if (!emails.length) return json(res, 422, { error: "至少提供一个邮箱或联系人ID" });
+    const mode = input.mode === "syntax" ? "syntax" : "domain";
+    const results = [];
+    const domainCache = new Map();
+    for (const email of emails) {
+      const domain = email.split("@")[1] || "";
+      let result;
+      if (mode === "domain" && validEmail(email) && domainCache.has(domain)) {
+        const cached = domainCache.get(domain);
+        result = {
+          ...cached,
+          emailHash: emailFingerprint(email),
+          checkedAt: new Date().toISOString(),
+        };
+      } else {
+        result = await validateEmailDomain(email, mode);
+        if (mode === "domain" && validEmail(email)) {
+          domainCache.set(domain, {
+            domain: result.domain,
+            status: result.status,
+            evidence: result.evidence,
+            mxHosts: result.mxHosts,
+          });
+        }
+      }
+      upsertValidation(result);
+      results.push({ ...result, fingerprint: publicFingerprint(result.emailHash), emailHash: undefined });
+    }
+    await writeJsonStore(validationPath, validationStore);
+    applyLocalContactState(model);
+    return json(res, 200, {
+      mode,
+      processed: results.length,
+      uniqueDomains: new Set(emails.filter(validEmail).map((email) => email.split("@")[1])).size,
+      results,
+      summary: publicValidationSummary(model),
+    });
+  }
+  if (req.method === "POST" && pathname === "/api/contact-quality/status") {
+    const input = await parseBody(req);
+    const email = normalize(input.email);
+    const status = String(input.status || "");
+    const evidence = String(input.evidence || "").trim().slice(0, 500);
+    if (!validEmail(email)) return json(res, 422, { error: "邮箱格式无效" });
+    if (!VALIDATION_STATUSES.has(status) || ["unverified", "opted_out"].includes(status)) {
+      return json(res, 422, { error: "不支持的人工验证状态" });
+    }
+    if (!evidence) return json(res, 422, { error: "人工状态必须提供可追溯证据" });
+    const record = {
+      emailHash: emailFingerprint(email),
+      domain: email.split("@")[1],
+      status,
+      checkedAt: new Date().toISOString(),
+      evidence: `manual:${evidence}`,
+      mxHosts: [],
+    };
+    upsertValidation(record);
+    await writeJsonStore(validationPath, validationStore);
+    applyLocalContactState(model);
+    return json(res, 200, { ...record, fingerprint: publicFingerprint(record.emailHash), emailHash: undefined });
+  }
+  if (req.method === "GET" && pathname === "/api/suppressions") {
+    return json(res, 200, {
+      count: (suppressionStore.records || []).length,
+      items: (suppressionStore.records || []).slice().reverse().map((item) => ({
+        fingerprint: publicFingerprint(item.emailHash),
+        domain: item.domain,
+        reason: item.reason,
+        source: item.source,
+        createdAt: item.createdAt,
+      })),
+    });
+  }
+  if (req.method === "POST" && pathname === "/api/suppressions") {
+    const input = await parseBody(req);
+    const email = normalize(input.email);
+    const reason = String(input.reason || "manual");
+    const source = String(input.source || "local-admin").trim().slice(0, 200) || "local-admin";
+    if (!validEmail(email)) return json(res, 422, { error: "邮箱格式无效" });
+    if (!SUPPRESSION_REASONS.has(reason)) return json(res, 422, { error: "不支持的抑制原因" });
+    const emailHash = emailFingerprint(email);
+    const { record, existing } = upsertSuppression({
+      emailHash,
+      domain: email.split("@")[1],
+      reason,
+      source,
+      createdAt: new Date().toISOString(),
+    });
+    upsertValidation({
+      emailHash,
+      domain: record.domain,
+      status: "opted_out",
+      checkedAt: new Date().toISOString(),
+      evidence: `suppression:${reason}`,
+      mxHosts: [],
+    });
+    await Promise.all([
+      writeJsonStore(suppressionPath, suppressionStore),
+      writeJsonStore(validationPath, validationStore),
+    ]);
+    applyLocalContactState(model);
+    return json(res, existing ? 200 : 201, {
+      fingerprint: publicFingerprint(record.emailHash),
+      domain: record.domain,
+      reason: record.reason,
+      source: record.source,
+      createdAt: record.createdAt,
+      existing: Boolean(existing),
+    });
+  }
+  if (req.method === "POST" && pathname === "/api/feedback/events") {
+    if (!FEEDBACK_WEBHOOK_SECRET) return json(res, 503, { error: "反馈回调尚未配置" });
+    const suppliedSecret = req.headers["x-feedback-secret"];
+    if (!secretMatches(suppliedSecret, FEEDBACK_WEBHOOK_SECRET)) return json(res, 401, { error: "反馈回调认证失败" });
+    const source = String(req.headers["x-feedback-source"] || "provider").trim().slice(0, 80) || "provider";
+    const result = await recordFeedbackEvent(await parseBody(req), source);
+    return json(res, result.duplicate ? 200 : 202, {
+      accepted: true,
+      duplicate: result.duplicate,
+      eventId: result.event.eventId,
+      type: result.event.type,
+      recipientFingerprint: publicFingerprint(result.event.recipientHash),
+      suppressed: result.suppressed,
+      outboxMatched: result.outboxMatched,
+    });
+  }
+  if (req.method === "GET" && pathname === "/api/contact-queues") {
+    const expired = (contactCollectionStore.queues || []).some((queue) => releaseExpiredLease(queue));
+    if (expired) await writeJsonStore(contactCollectionPath, contactCollectionStore);
+    return json(res, 200, {
+      version: contactCollectionStore.version,
+      items: (contactCollectionStore.queues || []).map((queue) => collectionQueueView(queue)),
+    });
+  }
+  if (req.method === "POST" && pathname === "/api/contact-queues/initialize") {
+    const input = await parseBody(req);
+    const sourceSpecs = Array.isArray(input.sources) && input.sources.length ? input.sources : DEFAULT_COLLECTION_SOURCES;
+    const resultPaths = Array.isArray(input.processedResultPaths)
+      ? input.processedResultPaths
+      : DEFAULT_COLLECTION_RESULTS;
+    const [sources, importedNames] = await Promise.all([
+      Promise.all(sourceSpecs.slice(0, 20).map(readCollectionSource)),
+      readProcessedCompanyNames(resultPaths.slice(0, 100)),
+    ]);
+    const key = String(input.key || "hung_hing_amity_20260811").trim().slice(0, 120);
+    const existing = (contactCollectionStore.queues || []).find((queue) => queue.key === key);
+    const queue = createOrSyncQueue(existing, {
+      id: existing?.id || `collection_${crypto.randomUUID()}`,
+      key,
+      label: input.label || "Hung Hing + Amity 全部买家公司联系人采集",
+      sources,
+      processedNames: [
+        ...(Array.isArray(input.processedNames) ? input.processedNames : []),
+        ...importedNames,
+        ...(!input.sources ? DEFAULT_IMPORTED_COMPLETIONS : []),
+      ],
+      config: input.config,
+    });
+    if (!existing) contactCollectionStore.queues.unshift(queue);
+    await writeJsonStore(contactCollectionPath, contactCollectionStore);
+    return json(res, existing ? 200 : 201, collectionQueueView(queue));
+  }
+  const collectionMatch = pathname.match(/^\/api\/contact-queues\/([^/]+)(?:\/(claim|pause|resume|boundary-report|batches\/([^/]+)\/complete))?$/);
+  if (collectionMatch) {
+    const [, id, action, batchId] = collectionMatch;
+    const queue = (contactCollectionStore.queues || []).find((item) => item.id === id);
+    if (!queue) return json(res, 404, { error: "联系人采集队列不存在" });
+    if (req.method === "GET" && !action) {
+      const changed = releaseExpiredLease(queue);
+      if (changed) await writeJsonStore(contactCollectionPath, contactCollectionStore);
+      const includeItems = url.searchParams.get("items") === "1";
+      return json(res, 200, collectionQueueView(queue, { includeItems }));
+    }
+    if (req.method === "GET" && action === "boundary-report") {
+      return json(res, 200, collectionBoundaryReport(queue));
+    }
+    if (req.method === "POST" && action === "claim") {
+      const input = await parseBody(req);
+      const batch = claimBatch(queue, {
+        ...input,
+        batchId: `batch_${crypto.randomUUID()}`,
+      });
+      await writeJsonStore(contactCollectionPath, contactCollectionStore);
+      return json(res, 200, { batch, queue: collectionQueueView(queue) });
+    }
+    if (req.method === "POST" && action?.startsWith("batches/") && batchId) {
+      const input = await parseBody(req);
+      const batch = queue.batches.find((item) => item.id === batchId);
+      if (!batch) return json(res, 404, { error: "采集批次不存在" });
+      const rawResults = Array.isArray(input.rawResults) ? input.rawResults.slice(0, 50) : [];
+      const artifactReference = String(input.artifactReference || "").trim()
+        || await writeCollectionArtifact(queue, batch, rawResults);
+      const results = rawResults.length
+        ? summarizeCollectionResults(queue, batch, rawResults)
+        : (Array.isArray(input.results) ? input.results.slice(0, 50) : []);
+      const view = completeBatch(queue, batchId, {
+        owner: input.owner,
+        results,
+        artifactReference,
+      });
+      await writeJsonStore(contactCollectionPath, contactCollectionStore);
+      return json(res, 200, { queue: view, artifactReference });
+    }
+    if (req.method === "POST" && ["pause", "resume"].includes(action)) {
+      const input = await parseBody(req);
+      const view = setQueueState(queue, action, input);
+      await writeJsonStore(contactCollectionPath, contactCollectionStore);
+      return json(res, 200, view);
+    }
+  }
+  if (req.method === "GET" && pathname === "/api/pipeline") {
+    return json(res, 200, pipelineSummary());
+  }
+  if (req.method === "POST" && pathname === "/api/pipeline/jobs") {
+    const input = cleanTaskInput(await parseBody(req));
+    const job = createPipelineJob(null, { ...input, inputReference: "" });
+    pipelineStore.jobs.unshift(job);
+    await writeJsonStore(pipelinePath, pipelineStore);
+    return json(res, 201, pipelineJobPublicView(job));
+  }
+  if (req.method === "POST" && pathname === "/api/pipeline/claim-next") {
+    const input = await parseBody(req);
+    const owner = String(input.owner || "").trim().slice(0, 120);
+    if (!owner) return json(res, 422, { error: "执行器owner不能为空" });
+    const job = claimNextPipelineJob(owner, boundedInteger(input.leaseSeconds, 300, 30, 3600));
+    await writeJsonStore(pipelinePath, pipelineStore);
+    return json(res, 200, { job: job ? pipelineJobPublicView(job) : null });
+  }
+  const pipelineMatch = pathname.match(/^\/api\/pipeline\/jobs\/([^/]+)\/(resume|stage|pause|circuit|recover)$/);
+  if (pipelineMatch && req.method === "POST") {
+    const [, id, action] = pipelineMatch;
+    const job = (pipelineStore.jobs || []).find((item) => item.id === id);
+    if (!job) return json(res, 404, { error: "流水线任务不存在" });
+    const input = await parseBody(req);
+    const now = new Date().toISOString();
+    if (action === "resume") {
+      const reference = String(input.inputReference || "").trim().slice(0, 500);
+      if (!reference) return json(res, 422, { error: "恢复任务必须提供可追溯输入引用" });
+      if (!['waiting_input', 'paused'].includes(job.status)) return json(res, 409, { error: "当前状态不允许恢复排队" });
+      job.inputReference = reference;
+      job.requiredInput = "";
+      job.status = "queued";
+      job.stages[job.currentStage] = { ...(job.stages[job.currentStage] || {}), status: "queued", updatedAt: now };
+      job.updatedAt = now;
+      job.audit = [...(job.audit || []), { at: now, type: "input_supplied", stage: job.currentStage }].slice(-1000);
+    } else if (action === "stage") {
+      updatePipelineStage(job, input);
+    } else if (action === "pause") {
+      job.status = "paused";
+      job.leaseOwner = "";
+      job.leaseExpiresAt = null;
+      job.updatedAt = now;
+      job.audit = [...(job.audit || []), { at: now, type: "pipeline_paused", reason: String(input.reason || "manual").slice(0, 300) }].slice(-1000);
+    } else if (action === "circuit") {
+      job.status = "circuit_open";
+      job.leaseOwner = "";
+      job.leaseExpiresAt = null;
+      job.stages[job.currentStage] = { ...(job.stages[job.currentStage] || {}), status: "circuit_open", updatedAt: now };
+      job.updatedAt = now;
+      job.audit = [...(job.audit || []), { at: now, type: "pipeline_circuit_opened", signal: String(input.signal || "manual").slice(0, 120) }].slice(-1000);
+    } else if (action === "recover") {
+      if (input.confirm !== `RECOVER PIPELINE ${id}`) return json(res, 428, { error: `需要输入确认短语：RECOVER PIPELINE ${id}` });
+      if (job.status !== "circuit_open") return json(res, 409, { error: "只有熔断任务可以人工恢复" });
+      job.status = "paused";
+      job.requiredInput = "恢复后需人工确认输入引用，再进入小批量金丝雀运行";
+      job.updatedAt = now;
+      job.audit = [...(job.audit || []), { at: now, type: "pipeline_human_recovery_confirmed" }].slice(-1000);
+    }
+    await writeJsonStore(pipelinePath, pipelineStore);
+    return json(res, 200, pipelineJobPublicView(job));
+  }
+  if (req.method === "GET" && pathname === "/api/ops/tasks") {
+    return json(res, 200, { items: (operationsStore.tasks || []).map(taskPublicView) });
+  }
+  if (req.method === "POST" && pathname === "/api/ops/tasks") {
+    const input = cleanTaskInput(await parseBody(req));
+    const now = new Date().toISOString();
+    const task = {
+      id: `task_${crypto.randomUUID()}`,
+      ...input,
+      status: "ready",
+      safetyState: "READY",
+      consecutiveAnomalies: 0,
+      counters: {
+        businessDate: currentBusinessDate(),
+        buyerEntries: 0,
+        companySearches: 0,
+        companyDetails: 0,
+        contactPages: 0,
+        rawContactRows: 0,
+      },
+      checkpoint: null,
+      createdAt: now,
+      updatedAt: now,
+      audit: [{ at: now, type: "task_created", safetyState: "READY" }],
+    };
+    operationsStore.tasks.unshift(task);
+    pipelineStore.jobs.unshift(createPipelineJob(task));
+    await Promise.all([
+      writeJsonStore(operationsPath, operationsStore),
+      writeJsonStore(pipelinePath, pipelineStore),
+    ]);
+    return json(res, 201, taskPublicView(task));
+  }
+  const taskMatch = pathname.match(/^\/api\/ops\/tasks\/([^/]+)(?:\/(actions|recover))?$/);
+  if (taskMatch) {
+    const [, id, action] = taskMatch;
+    const task = (operationsStore.tasks || []).find((item) => item.id === id);
+    if (!task) return json(res, 404, { error: "采集任务不存在" });
+    if (req.method === "GET" && !action) return json(res, 200, taskPublicView(task));
+    if (req.method === "POST" && action === "actions") {
+      const input = await parseBody(req);
+      try {
+        recordTaskAction(task, input);
+      } catch (error) {
+        await writeJsonStore(operationsPath, operationsStore);
+        throw error;
+      }
+      await writeJsonStore(operationsPath, operationsStore);
+      return json(res, 200, taskPublicView(task));
+    }
+    if (req.method === "POST" && action === "recover") {
+      const input = await parseBody(req);
+      if (input.confirm !== `RECOVER ${id}`) return json(res, 428, { error: `需要输入确认短语：RECOVER ${id}` });
+      const now = new Date().toISOString();
+      task.status = "ready";
+      task.safetyState = "HUMAN_RECOVERY";
+      task.consecutiveAnomalies = 0;
+      task.budgets = {
+        ...task.budgets,
+        buyerEntriesDaily: Math.min(task.budgets.buyerEntriesDaily, 100),
+        companyDetailsDaily: Math.min(task.budgets.companyDetailsDaily, 5),
+        contactPagesDaily: Math.min(task.budgets.contactPagesDaily, 25),
+      };
+      resetDailyCounters(task, currentBusinessDate());
+      task.updatedAt = now;
+      task.audit = [...(task.audit || []), { at: now, type: "human_recovery_confirmed", safetyState: task.safetyState }].slice(-1000);
+      await writeJsonStore(operationsPath, operationsStore);
+      return json(res, 200, taskPublicView(task));
+    }
+  }
+  if (req.method === "POST" && pathname === "/api/ai/draft") {
+    const now = Date.now();
+    if (aiRequestInFlight || now - lastAiRequestAt < AI_MIN_INTERVAL_MS) {
+      return json(res, 429, { error: "AI生成请求过于频繁，请稍后重试" });
+    }
+    lastAiRequestAt = now;
+    aiRequestInFlight = true;
+    try {
+      return json(res, 200, await generateAiDraft(await parseBody(req)));
+    } finally {
+      aiRequestInFlight = false;
+    }
+  }
+  if (req.method === "GET" && pathname === "/api/options") {
+    return json(res, 200, {
+      countries: [...new Set(model.buyers.map((item) => item.country))].filter(Boolean).sort(),
+      confidences: ["高", "中高", "中", "低"],
+      priorities: ["A-采购/运营", "B-管理层", "C-相关角色", "D-其他/公共"],
+      enrichedBuyers: model.source.top20_company_and_contacts.map((item) => item.query_name),
+      variables: ["{{first_name}}", "{{full_name}}", "{{company}}", "{{buyer_name}}", "{{country}}", "{{role}}"],
+      emailScenarios: EMAIL_SCENARIOS.map(({ id, name, wordRange, maxAssets, requiredFields }) => ({ id, name, wordRange, maxAssets, requiredFields })),
+      emailClaims: GUARDED_CLAIMS.map(({ id, label, text }) => ({ id, label, text })),
+      emailAssets: EMAIL_ASSETS.map(({ id, label, url, tags, requiredClaim }) => ({ id, label, url, tags, requiredClaim })),
+      emailTemplate: { version: EMAIL_TEMPLATE_LIBRARY.version, source: EMAIL_TEMPLATE_LIBRARY.source },
+    });
+  }
+  if (req.method === "GET" && pathname === "/api/outbox") {
+    return json(res, 200, outboxPublicSummary());
+  }
+  const outboxMatch = pathname.match(/^\/api\/outbox\/([^/]+)\/resolve$/);
+  if (outboxMatch && req.method === "POST") {
+    const entry = (outboxStore.entries || []).find((item) => item.id === outboxMatch[1]);
+    if (!entry) return json(res, 404, { error: "发件箱记录不存在" });
+    if (entry.status !== "uncertain") return json(res, 409, { error: "只有uncertain记录需要人工裁决" });
+    const input = await parseBody(req);
+    if (input.confirm !== `RESOLVE ${entry.id}`) return json(res, 428, { error: `需要输入确认短语：RESOLVE ${entry.id}` });
+    const outcome = input.outcome === "accepted" ? "accepted" : "failed";
+    await transitionOutbox(entry, outcome, { type: "manual_delivery_resolution", lastError: String(input.note || "manual resolution") });
+    return json(res, 200, outboxPublicSummary());
+  }
+  if (req.method === "GET" && pathname === "/api/campaigns") {
+    const campaigns = await readCampaigns();
+    return json(res, 200, campaigns.map((campaign) => campaignWithMetrics(model, campaign)));
+  }
+  if (req.method === "POST" && pathname === "/api/campaigns") {
+    const input = cleanCampaignInput(await parseBody(req));
+    const campaigns = await readCampaigns();
+    const now = new Date().toISOString();
+    const campaign = {
+      id: `cmp_${crypto.randomUUID()}`,
+      ...input,
+      status: "draft",
+      createdAt: now,
+      updatedAt: now,
+      scheduleAt: null,
+      audit: [{ at: now, action: "draft_created" }],
+    };
+    campaigns.unshift(campaign);
+    await writeCampaigns(campaigns);
+    return json(res, 201, campaignWithMetrics(model, campaign));
+  }
+
+  const campaignMatch = pathname.match(/^\/api\/campaigns\/([^/]+)(?:\/(preview|submit-review|approve|simulate-schedule|send))?$/);
+  if (campaignMatch) {
+    const [, id, action] = campaignMatch;
+    const campaigns = await readCampaigns();
+    const index = campaigns.findIndex((campaign) => campaign.id === id);
+    if (index < 0) return json(res, 404, { error: "活动不存在" });
+    const campaign = campaigns[index];
+
+    if (req.method === "GET" && !action) return json(res, 200, campaignWithMetrics(model, campaign));
+
+    if (req.method === "PUT" && !action) {
+      if (campaign.status !== "draft") return json(res, 409, { error: "只有草稿可以编辑" });
+      const input = cleanCampaignInput(await parseBody(req));
+      campaigns[index] = { ...campaign, ...input, updatedAt: new Date().toISOString() };
+      await writeCampaigns(campaigns);
+      return json(res, 200, campaignWithMetrics(model, campaigns[index]));
+    }
+
+    if (req.method === "POST" && action === "preview") {
+      const recipients = campaignRecipients(model, campaign).slice(0, 5);
+      const assets = (campaign.assetIds || []).map((id) => ASSET_BY_ID.get(id)).filter(Boolean);
+      return json(res, 200, {
+        campaignId: id,
+        estimatedRecipients: campaignRecipients(model, campaign).length,
+        scenario: campaign.brief?.scenario || "first_touch",
+        assets: assets.map(({ id: assetId, label, url }) => ({ id: assetId, label, url })),
+        contentErrors: campaignContentErrors(campaign),
+        warning: "所有邮箱仍为unverified；此预览不会发送邮件。配图不含跟踪像素。",
+        items: recipients.map((recipient) => ({
+          recipient: { name: recipient.name, email: recipient.email, company: recipient.matchedCompany, priority: recipient.priority },
+          subject: renderTemplate(campaign.subject, recipient),
+          body: renderTemplate(campaign.body, recipient),
+          wordCount: englishWordCount(renderTemplate(campaign.body, recipient)),
+        })),
+      });
+    }
+
+    if (req.method === "POST" && action === "submit-review") {
+      const recipients = campaignRecipients(model, campaign);
+      const errors = campaignContentErrors(campaign);
+      if (!recipients.length) errors.push("没有符合条件的邮箱联系人");
+      if (errors.length) return json(res, 422, { error: "无法提交审核", details: errors });
+      const now = new Date().toISOString();
+      campaigns[index] = {
+        ...campaign,
+        status: "review",
+        updatedAt: now,
+        recipientSnapshot: { count: recipients.length, createdAt: now, sourceDate: model.summary.retrievalDate },
+        audit: [...(campaign.audit || []), { at: now, action: "submitted_for_review" }],
+      };
+      await writeCampaigns(campaigns);
+      return json(res, 200, campaignWithMetrics(model, campaigns[index]));
+    }
+
+    if (req.method === "POST" && action === "approve") {
+      const input = await parseBody(req);
+      if (input.confirm !== `APPROVE ${id}`) {
+        return json(res, 428, { error: `需要输入确认短语：APPROVE ${id}` });
+      }
+      if (campaign.status !== "review") {
+        return json(res, 409, { error: "只有 review 状态的活动可以批准" });
+      }
+      const recipients = campaignRecipients(model, campaign);
+      const errors = campaignContentErrors(campaign);
+      if (!recipients.length) errors.push("没有符合条件的收件人");
+      const checks = campaign.compliance || {};
+      if (!checks.senderDomainVerified) errors.push("发件域名未确认");
+      if (!checks.unsubscribeConfigured) errors.push("退订机制未确认");
+      if (!checks.physicalAddressConfigured) errors.push("实体地址未确认");
+      if (!checks.suppressionListChecked) errors.push("抑制名单未检查");
+      if (errors.length) return json(res, 422, { error: "活动未达到批准门槛", details: [...new Set(errors)] });
+      const now = new Date().toISOString();
+      const reviewer = String(input.reviewer || "local-admin").trim().slice(0, 120) || "local-admin";
+      campaigns[index] = {
+        ...campaign,
+        status: "approved",
+        updatedAt: now,
+        approvedAt: now,
+        approvedBy: reviewer,
+        recipientSnapshot: campaign.recipientSnapshot || {
+          count: recipients.length,
+          createdAt: now,
+          sourceDate: model.summary.retrievalDate,
+        },
+        audit: [...(campaign.audit || []), { at: now, action: "campaign_approved", reviewer }],
+      };
+      await writeCampaigns(campaigns);
+      return json(res, 200, campaignWithMetrics(model, campaigns[index]));
+    }
+
+    if (req.method === "POST" && action === "simulate-schedule") {
+      if (!["review", "approved"].includes(campaign.status)) return json(res, 409, { error: "活动必须先进入审核状态" });
+      const input = await parseBody(req);
+      const now = new Date().toISOString();
+      const scheduleAt = input.scheduleAt ? new Date(input.scheduleAt).toISOString() : new Date(Date.now() + 86400000).toISOString();
+      campaigns[index] = {
+        ...campaign,
+        status: "simulated_scheduled",
+        scheduleAt,
+        updatedAt: now,
+        audit: [...(campaign.audit || []), { at: now, action: "simulated_schedule_created", scheduleAt }],
+      };
+      await writeCampaigns(campaigns);
+      return json(res, 200, campaignWithMetrics(model, campaigns[index]));
+    }
+
+    if (req.method === "POST" && action === "send") {
+      const input = await parseBody(req);
+      if (input.confirm !== `SEND ${id}`) {
+        return json(res, 428, { error: `需要输入确认短语：SEND ${id}` });
+      }
+      const readiness = sendReadiness(model, campaign);
+      if (!readiness.ready) return json(res, 423, { error: "发送条件未满足", details: readiness.errors });
+
+      const available = sendableRecipients(model, campaign);
+      const batch = available.slice(0, deliveryConfig.batchLimit);
+      const sentHashes = [];
+      const failures = [];
+      for (let indexInBatch = 0; indexInBatch < batch.length; indexInBatch += 1) {
+        const recipient = batch[indexInBatch];
+        let outboxEntry;
+        try {
+          outboxEntry = await prepareOutboxEntry(campaign, recipient);
+          await transitionOutbox(outboxEntry, "sending");
+          const delivery = await sendSmtpMessage({
+            to: recipient.email,
+            subject: renderTemplate(campaign.subject, recipient),
+            body: renderTemplate(campaign.body, recipient),
+            assetIds: campaign.assetIds || [],
+            messageId: outboxEntry.messageId,
+          });
+          await transitionOutbox(outboxEntry, "accepted", { providerResponse: delivery.response });
+          sentHashes.push(stableId("delivery", normalize(recipient.email)));
+        } catch (error) {
+          const status = error.deliveryUncertain ? "uncertain" : "failed";
+          if (outboxEntry) await transitionOutbox(outboxEntry, status, { lastError: error.message });
+          failures.push({ recipientId: recipient.id, status, error: clipText(error.message, 240) });
+        }
+        if (indexInBatch < batch.length - 1) await delay(deliveryConfig.delayMs);
+      }
+
+      const nowIso = new Date().toISOString();
+      const previousHashes = campaign.delivery?.recipientHashes || [];
+      const recipientHashes = [...new Set([...previousHashes, ...sentHashes])];
+      const remaining = Math.max(available.length - sentHashes.length, 0);
+      campaigns[index] = {
+        ...campaign,
+        status: remaining === 0 && failures.length === 0 ? "sent" : "partially_sent",
+        updatedAt: nowIso,
+        delivery: {
+          sentCount: recipientHashes.length,
+          recipientHashes,
+          lastBatchAt: nowIso,
+          lastBatchSent: sentHashes.length,
+          lastBatchFailed: failures.length,
+        },
+        audit: [...(campaign.audit || []), {
+          at: nowIso,
+          action: "smtp_batch_attempted",
+          sent: sentHashes.length,
+          failed: failures.length,
+        }],
+      };
+      await writeCampaigns(campaigns);
+      const result = {
+        campaign: campaignWithMetrics(model, campaigns[index]),
+        batch: { attempted: batch.length, sent: sentHashes.length, failed: failures.length, remaining },
+        failures,
+      };
+      return json(res, sentHashes.length ? 200 : 502, result);
+    }
+  }
+
+  if (pathname === "/api/send" || pathname.endsWith("/send")) {
+    return json(res, 423, { error: "真实发送功能已锁定", sendingEnabled: false });
+  }
+  return json(res, 404, { error: "接口不存在" });
+}
+
+const mime = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+};
+
+async function staticHandler(res, pathname) {
+  const requested = pathname === "/" ? "index.html" : decodeURIComponent(pathname).replace(/^\/+/, "");
+  const filePath = path.resolve(publicDir, requested);
+  if (!filePath.startsWith(`${publicDir}${path.sep}`) && filePath !== path.join(publicDir, "index.html")) {
+    return text(res, 403, "Forbidden");
+  }
+  try {
+    const file = await fs.readFile(filePath);
+    res.writeHead(200, {
+      "Content-Type": mime[path.extname(filePath).toLowerCase()] || "application/octet-stream",
+      "Content-Length": file.length,
+      "Cache-Control": "no-cache",
+    });
+    res.end(file);
+  } catch (error) {
+    if (error.code === "ENOENT") return text(res, 404, "Not found");
+    throw error;
+  }
+}
+
+const source = await readSource();
+const model = buildModel(source);
+applyLocalContactState(model);
+
+const server = http.createServer(async (req, res) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+  );
+  try {
+    const url = new URL(req.url, `http://${req.headers.host || `${host}:${port}`}`);
+    if (url.pathname === "/favicon.ico") {
+      res.writeHead(204, { "Cache-Control": "public, max-age=86400" });
+      return res.end();
+    }
+    if (url.pathname.startsWith("/api/")) return await apiHandler(req, res, url, model);
+    return await staticHandler(res, url.pathname);
+  } catch (error) {
+    console.error(error);
+    return json(res, error.status || 500, { error: error.message || "服务器错误" });
+  }
+});
+
+server.listen(port, host, () => {
+  console.log(`Dakings Prospect Ops running at http://${host}:${port}`);
+  console.log(`Source: ${sourcePath}`);
+  console.log(`OpenAI draft generation: ${process.env.OPENAI_API_KEY ? `configured (${OPENAI_MODEL})` : "not configured"}`);
+  console.log(`SMTP delivery: ${deliveryConfig.enabled && isSmtpConfigured() ? "enabled" : "locked"}`);
+});

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "commit": "80b3bebf0fccc819693973d97b128f93d4c43829",
+  "branch": "production/main",
+  "recoveryPhase": "10.2",
+  "recoveryStatus": "control_plane_release_frozen",
+  "deployedAt": "2026-09-06T23:45:59+08:00"
+}

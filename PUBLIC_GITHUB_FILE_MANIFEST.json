@@ -1,0 +1,954 @@
+{
+  "schemaVersion": 1,
+  "source": "D:\\zcy\\外贸自动化拓客系统",
+  "sourceCommit": "e61fe70de3566a6a586a272f110ff3f1f70c9e87",
+  "generatedAt": "2026-09-08",
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha256": "985846a2921173b88940505b668f1811c226bc4d2da7849067de561329bb0855",
+      "sizeBytes": 501
+    },
+    {
+      "path": "app/.server-4174.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sizeBytes": 0
+    },
+    {
+      "path": "app/.server-4174.stdout.log",
+      "sha256": "2e72e8d62ab9a5a7a6645a4b6ca93bc39e3cc4c0d07fe7b1f72f653000dd53ba",
+      "sizeBytes": 254
+    },
+    {
+      "path": "app/.server.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sizeBytes": 0
+    },
+    {
+      "path": "app/.server.stdout.log",
+      "sha256": "d6d9cfc21e25e90188d3ba511405d1fb595a7f9230cdf976ce0de5b5fe11931b",
+      "sizeBytes": 264
+    },
+    {
+      "path": "app/auto-approval.mjs",
+      "sha256": "387c3818b6a31b330adad1d7bc14681e659095f357ce79aa6400c66b3bb54d8c",
+      "sizeBytes": 2710
+    },
+    {
+      "path": "app/company-processing-strategy.mjs",
+      "sha256": "1c6e829cd00d027c5d235548e1f3b88f924d544d36b14dc3c66f2c57e408683b",
+      "sizeBytes": 794
+    },
+    {
+      "path": "app/company-qualification.mjs",
+      "sha256": "df1f2903721dce7f83006b3d3d5587812860dc71e6576c261c05be3c42d14c5a",
+      "sizeBytes": 3040
+    },
+    {
+      "path": "app/contact-collection.mjs",
+      "sha256": "d1e9c76707bb4f0d2f1f58b83e7269b26a7d4ca9d4c1ccabad96a8b1bdcc45af",
+      "sizeBytes": 24629
+    },
+    {
+      "path": "app/contact-collection.mjs.before-proxy",
+      "sha256": "9db72c35e82b21a716e64e00ce645c3e9bb44dd9236a66ae98192e40050ca03e",
+      "sizeBytes": 17337
+    },
+    {
+      "path": "app/data/campaigns.json",
+      "sha256": "83bcadbd33769076e39f501aa0cb12f1ec68e1c5fcf4d1530d7bc6a8b90bbf23",
+      "sizeBytes": 8386
+    },
+    {
+      "path": "app/data/contact-collection.json",
+      "sha256": "a379f670e4e4457739cbba0af9884877561bec8b93b2eb07a8a5c074e65abcd4",
+      "sizeBytes": 1821618
+    },
+    {
+      "path": "app/data/contact-validation.json",
+      "sha256": "d8acc05983d470ac35ea820c6c0c0f106325d709c7a7d6958686a4e60a8e9709",
+      "sizeBytes": 184566
+    },
+    {
+      "path": "app/data/email-template-library.json",
+      "sha256": "cc4e04263a3e1e0a6a26afbe07c71e4d8831fa3500e569144fe653973ccfb094",
+      "sizeBytes": 5186
+    },
+    {
+      "path": "app/data/managed-history-report.json",
+      "sha256": "35f450fc695acd21d0f02aecf56e2e163eca00123ddb6413266f63865fbe56e9",
+      "sizeBytes": 1030
+    },
+    {
+      "path": "app/data/netease-supervisor-state.json",
+      "sha256": "01a3343fda55fd0b1c21c321379c0253e53f262132e0f68b375f5854f9979356",
+      "sizeBytes": 183
+    },
+    {
+      "path": "app/data/operations.json",
+      "sha256": "f77a958428aeaf791a71077592ceea2634326209521542eba49aace02fd5760a",
+      "sizeBytes": 170472
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_0455cecc-732c-4c53-a081-8e56786a8ac6/buyer_matching.json",
+      "sha256": "9fd87ecd359195e523dfab098cc16eb188016234cf5608ea338b89adf72dac16",
+      "sizeBytes": 11205
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_0455cecc-732c-4c53-a081-8e56786a8ac6/contact_enrichment.json",
+      "sha256": "0042038129eef3f503b6e0025786de6c886898ec4dd236539bc0e9c58da54555",
+      "sizeBytes": 42573
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_0455cecc-732c-4c53-a081-8e56786a8ac6/discovery.json",
+      "sha256": "f61b067725c9106b3b9cdc79c2df02b2d793d94e1693e48cf3a690355788bc92",
+      "sizeBytes": 9562
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_0455cecc-732c-4c53-a081-8e56786a8ac6/trade_normalization.json",
+      "sha256": "70db8ea90a8f93c171579f4932fdc8dddaaf5857acab2503e5113aea6f9cac53",
+      "sizeBytes": 12530
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_0455cecc-732c-4c53-a081-8e56786a8ac6/validation.json",
+      "sha256": "ae3f623921a034d53ccdf40d244aab15edd1f53973c02bcbabd1d5b0746ba0ed",
+      "sizeBytes": 50283
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_0884cd45-a14d-44fd-9d23-8fd27756b97d/buyer_matching.json",
+      "sha256": "8c381d2180f56a306ad036dbad27dba8e98774ffa533f987a5dba0dadf250bea",
+      "sizeBytes": 11249
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_0884cd45-a14d-44fd-9d23-8fd27756b97d/contact_enrichment.json",
+      "sha256": "d7ddc2aa5b62473069ba27bb302732fdcc422693e4a7f691cbe1a9dba57409c3",
+      "sizeBytes": 15113
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_0884cd45-a14d-44fd-9d23-8fd27756b97d/discovery.json",
+      "sha256": "c96ef44680e81b438c70dd53dcd0167aac50581c7fd668a108fdaa53338dabd9",
+      "sizeBytes": 9568
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_0884cd45-a14d-44fd-9d23-8fd27756b97d/trade_normalization.json",
+      "sha256": "20b4ef411dd4280a2363bdc682b40de2ee11d44b2a67f420c3aa699a3583112d",
+      "sizeBytes": 12515
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_0884cd45-a14d-44fd-9d23-8fd27756b97d/validation.json",
+      "sha256": "6cbf286c791da3722fdff901197355425f8ef8147654b562525e409cb3414d31",
+      "sizeBytes": 17746
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_7853c1d0-f5dd-4d58-8c9f-6dfbd68aadd7/buyer_matching.json",
+      "sha256": "49be393231fbb551fe35cf87dc95bf7aa606b21c8f563f721d8657b86548a469",
+      "sizeBytes": 11314
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_7853c1d0-f5dd-4d58-8c9f-6dfbd68aadd7/contact_enrichment.json",
+      "sha256": "b919f1223ae290a41c45371838ddab8b292f4d1b976dc8eb9461fa7a8e958355",
+      "sizeBytes": 22939
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_7853c1d0-f5dd-4d58-8c9f-6dfbd68aadd7/discovery.json",
+      "sha256": "9cc9ebbaa763508303e65570fa6b8aa52e4887e6bca96f3bd32f2fb133b74633",
+      "sizeBytes": 9590
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_7853c1d0-f5dd-4d58-8c9f-6dfbd68aadd7/trade_normalization.json",
+      "sha256": "f904ff4a4f4d6f001b1dbe25908e68b2d2253b4b19a0be6c02dc690346b2e129",
+      "sizeBytes": 12574
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_7853c1d0-f5dd-4d58-8c9f-6dfbd68aadd7/validation.json",
+      "sha256": "96bc9366c242f42144105cbb5f60c5bc2137b25ef9f8f9b6d0433d99e35dccaf",
+      "sizeBytes": 27134
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_8f74a212-a0dd-4d60-ae10-9bd5a230fb18/buyer_matching.json",
+      "sha256": "9fd87ecd359195e523dfab098cc16eb188016234cf5608ea338b89adf72dac16",
+      "sizeBytes": 11205
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_8f74a212-a0dd-4d60-ae10-9bd5a230fb18/contact_enrichment.json",
+      "sha256": "8bd22f0ba57fda05337bdab06560ccf721b87d55b28769f9ccf20693ea065681",
+      "sizeBytes": 197
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_8f74a212-a0dd-4d60-ae10-9bd5a230fb18/discovery.json",
+      "sha256": "f61b067725c9106b3b9cdc79c2df02b2d793d94e1693e48cf3a690355788bc92",
+      "sizeBytes": 9562
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_8f74a212-a0dd-4d60-ae10-9bd5a230fb18/trade_normalization.json",
+      "sha256": "70db8ea90a8f93c171579f4932fdc8dddaaf5857acab2503e5113aea6f9cac53",
+      "sizeBytes": 12530
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_8f74a212-a0dd-4d60-ae10-9bd5a230fb18/validation.json",
+      "sha256": "a512c8f6d03112eaafaf24101098d4fbe78736f79c022da02dafa059e267bd51",
+      "sizeBytes": 185
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_9650534a-2516-4cec-9a0a-df8643051beb/buyer_matching.json",
+      "sha256": "4e7c5858c0e20263978673c3bef74656a4217f5a449ccb3c37bdbd9712ce6a91",
+      "sizeBytes": 11310
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_9650534a-2516-4cec-9a0a-df8643051beb/contact_enrichment.json",
+      "sha256": "b6fd728e95e3cf45f5fa3d2689e3953c21c67a168e52c5fb5860dc79fd82bbf3",
+      "sizeBytes": 14503
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_9650534a-2516-4cec-9a0a-df8643051beb/discovery.json",
+      "sha256": "f4a11293cf711629e6ea410f75a073a20745efd0e14107063a20c9b062f80b2f",
+      "sizeBytes": 9598
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_9650534a-2516-4cec-9a0a-df8643051beb/trade_normalization.json",
+      "sha256": "c64ca09c97cfd04c5a26990eb04ebd9bc7abc2f5f96c0aeff19c9b82d408ef13",
+      "sizeBytes": 12579
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_9650534a-2516-4cec-9a0a-df8643051beb/validation.json",
+      "sha256": "6bb3b52534091a71f12789b4394e1c3786b1cc9ddd74df6ede7daf22910e869b",
+      "sizeBytes": 17224
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_ce90cc45-b800-4da3-855d-1e88c2778b66/buyer_matching.json",
+      "sha256": "c11152093c58f8bd81ce516fad4f12ccaff8bd63ea9718b4a33e0d5302b59077",
+      "sizeBytes": 11236
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_ce90cc45-b800-4da3-855d-1e88c2778b66/discovery.json",
+      "sha256": "456b8150a13ea873d0a8478b2fef9ea32296abd3575f7cd0bf19535261c47f4a",
+      "sizeBytes": 9547
+    },
+    {
+      "path": "app/data/pipeline-artifacts/pipe_ce90cc45-b800-4da3-855d-1e88c2778b66/trade_normalization.json",
+      "sha256": "4341d5e6b81ed696917f280eddfe6b4b48428a1f76a467d57b92cd9050f240c1",
+      "sizeBytes": 12509
+    },
+    {
+      "path": "app/data/pipeline.json",
+      "sha256": "2d8cbd7b28ba9f36e7568dad9245b41922ffbe1f2b89063c465180401e7928c3",
+      "sizeBytes": 48361
+    },
+    {
+      "path": "app/data/suppressions.json",
+      "sha256": "40c437de18f084113a10943d0129fc5d2f967aa098cce7a2f82473996af23a81",
+      "sizeBytes": 714
+    },
+    {
+      "path": "app/keyword-collection.mjs",
+      "sha256": "478d4e3b01039b516f989126dbb212c085882ce1758aaf775e02e524490d7423",
+      "sizeBytes": 5655
+    },
+    {
+      "path": "app/observability.mjs",
+      "sha256": "76091e90910ffc0ca3f5db68a2412191468a50b72ae6c1555cd434f85b35a35b",
+      "sizeBytes": 8784
+    },
+    {
+      "path": "app/pipeline-worker.mjs",
+      "sha256": "65d640b803726508631814f2ff04b9f2381b5821e1256055e659aa875ac3afa9",
+      "sizeBytes": 42299
+    },
+    {
+      "path": "app/public/app.js",
+      "sha256": "7f15ebda2f51827efec0d56e0f6394dc470b1ed70ce6ca6bfbc93b434b807df0",
+      "sizeBytes": 179403
+    },
+    {
+      "path": "app/public/assets/email/cards-board-games.jpg",
+      "sha256": "e2023660e3c64710aae7a50b3f066b1f2d303fbad1bf73db753b778a04a66fd0",
+      "sizeBytes": 255866
+    },
+    {
+      "path": "app/public/assets/email/children-books.jpg",
+      "sha256": "e6e89fa4cd94b2c8cc1bcd99ba7eb0145d5235706cba3d5652938ce1144dcc69",
+      "sizeBytes": 650366
+    },
+    {
+      "path": "app/public/assets/email/collectible-books.jpg",
+      "sha256": "e0e34e2f64b68e064b68cbe7a71035857e63b001bd616f23d6e2c1edfa584b0f",
+      "sizeBytes": 270996
+    },
+    {
+      "path": "app/public/assets/email/colored-edge-books.jpg",
+      "sha256": "45da39552591f13dad06436fd10864b660f6b1fd893bf64ed6774cd7c058a3cc",
+      "sizeBytes": 850609
+    },
+    {
+      "path": "app/public/assets/email/comic-art-books.jpg",
+      "sha256": "cb5f9f881828fcb068f98b7beeaa9dde4c4ece434df94faddeb700e0c388e252",
+      "sizeBytes": 397578
+    },
+    {
+      "path": "app/public/assets/email/factory-floor.jpg",
+      "sha256": "d58be3b48dbf80892f00fa917b25b73734fd4bf2d26422b67c3368f568abe720",
+      "sizeBytes": 518041
+    },
+    {
+      "path": "app/public/assets/email/games-packaging.jpg",
+      "sha256": "e3dff8cca07607c7685273c0e67f49e5ea9beeae9deeda10227dd182b229e21e",
+      "sizeBytes": 809526
+    },
+    {
+      "path": "app/public/assets/email/premium-books-set.jpg",
+      "sha256": "469dda2f911df51b38e6392e2b185379792bf10a20cd30b355b9474631ec2b93",
+      "sizeBytes": 878115
+    },
+    {
+      "path": "app/public/assets/email/tarot-packaging.jpg",
+      "sha256": "2051a496ada6d8808d8b0934ce55098a3f97e76bf21c3a29c55d553989f548cb",
+      "sizeBytes": 274402
+    },
+    {
+      "path": "app/public/assets/fonts/inter-latin-400-600.woff2",
+      "sha256": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+      "sizeBytes": 48256
+    },
+    {
+      "path": "app/public/assets/fonts/jetbrains-mono-latin-400-600.woff2",
+      "sha256": "83c005d49d8a6a50474c73a5a36ac0468076e9c4a29da7bdb14995d80560a5be",
+      "sizeBytes": 31432
+    },
+    {
+      "path": "app/public/assets/fonts/space-grotesk-latin-500-700.woff2",
+      "sha256": "0640890476fc1198ab4de571fb658de443c4d85b66466ec09534a8737ab1ce9d",
+      "sizeBytes": 22288
+    },
+    {
+      "path": "app/public/index.html",
+      "sha256": "78b1cae1ab3e23e322d4e5d2903966a47e6c316c40eaa7d8d0704b51f6127cae",
+      "sizeBytes": 4720
+    },
+    {
+      "path": "app/public/styles.css",
+      "sha256": "03c6e2cdb39e6cb92d405194062284ffdf7a714157a091df3c95841e1655277f",
+      "sizeBytes": 52895
+    },
+    {
+      "path": "app/public/tokens.css",
+      "sha256": "b426bc9135796322e24abb705bae9c947d2e4270958413313cbd366f08dc1453",
+      "sizeBytes": 2944
+    },
+    {
+      "path": "app/README.md",
+      "sha256": "2dff61fba3a41dae6cd773de1fec2f9cec0a8681f18b5e67b582445b339f7b44",
+      "sizeBytes": 24448
+    },
+    {
+      "path": "app/server.mjs",
+      "sha256": "87fadbb175e0e4a7c87d70557a624571d27b915b8b32edaabc96215fdfdfc3e9",
+      "sizeBytes": 260410
+    },
+    {
+      "path": "app/server.mjs.before-proxy",
+      "sha256": "c6f1eae9c2b5ed60f0a0c3235083c5465b66d89431ef2f191849d698ee84e049",
+      "sizeBytes": 134176
+    },
+    {
+      "path": "app/services/approval-adapter.mjs",
+      "sha256": "7ebe259083cd819a269cff1878dcac5d2a3e5983e572a90b7f9157bea2e48a80",
+      "sizeBytes": 1969
+    },
+    {
+      "path": "app/tests/approval-adapter-integration-unit.mjs",
+      "sha256": "85610474fc27dedb51103f5947e6a81ee6d037d6df142a722189e6199d83ec2e",
+      "sizeBytes": 1276
+    },
+    {
+      "path": "app/tests/approval-adapter-unit.mjs",
+      "sha256": "1f596b4a1de72316ea1e8c93ed6560b7a6c4ab85d7af54836408dd169cffd4f4",
+      "sizeBytes": 1789
+    },
+    {
+      "path": "app/tests/auto-approval-unit.mjs",
+      "sha256": "9239d1255da5b7d1bcd1ba883ade9ca6f5d3302fd7777929793519eaa0ff9ee2",
+      "sizeBytes": 1391
+    },
+    {
+      "path": "app/tests/company-processing-strategy-unit.mjs",
+      "sha256": "78023429b5930b474cfd7b3358f52c16b3eaa9af45c4924ff725cba93c05d1c7",
+      "sizeBytes": 651
+    },
+    {
+      "path": "app/tests/company-qualification-unit.mjs",
+      "sha256": "eced4a3447d6547ca08caeea9a1045ba5bc7ba3123391ff23fb3133a4754fd19",
+      "sizeBytes": 1766
+    },
+    {
+      "path": "app/tests/contact-collection-unit.mjs",
+      "sha256": "88715e27e1b5a3f451634505c4684f7b0482864cb03c1bb222eb81dbe8d1aab2",
+      "sizeBytes": 7660
+    },
+    {
+      "path": "app/tests/deployment-contract-unit.mjs",
+      "sha256": "e15b93962dcccd2cef9a40d0b63cd8619000395f54afec952e98630e6f8f02f0",
+      "sizeBytes": 8945
+    },
+    {
+      "path": "app/tests/feature-integration-unit.mjs",
+      "sha256": "ff9b1d1cb928cd4e38b2b8643f1eb11433fad9a640ec7cedc83d2941ab24d90d",
+      "sizeBytes": 2744
+    },
+    {
+      "path": "app/tests/fixtures/d-only-source.json",
+      "sha256": "1294d8a90be78e3ad1334b03b2ce150bd687be24dc6bba1d68a3b7a5895ef318",
+      "sizeBytes": 1070
+    },
+    {
+      "path": "app/tests/keyword-collection-unit.mjs",
+      "sha256": "dc7c6805a45df798a158c53113c3561903e3e9391b0853c35484f2b3f0a497c5",
+      "sizeBytes": 2441
+    },
+    {
+      "path": "app/tests/managed-hscode-plan-unit.mjs",
+      "sha256": "9e7a538bfe4383224d7edb0db52c44e56a740eb243bde29f7ad6b2f7829db5f6",
+      "sizeBytes": 2831
+    },
+    {
+      "path": "app/tests/mobile-responsive-unit.mjs",
+      "sha256": "2e593cc28bbd9d096b9c3e7652dac00539fa8639efbe1eee2276e222417097c5",
+      "sizeBytes": 2599
+    },
+    {
+      "path": "app/tests/netease-safety-unit.mjs",
+      "sha256": "a5f9805d1e1b67ad82677c74cc5f6ec7bb24b9bc152b616fe483518aa781d1c6",
+      "sizeBytes": 5258
+    },
+    {
+      "path": "app/tests/observability-contract-unit.mjs",
+      "sha256": "12782188ea5361cf418c90e304f7e0d845d19659f9198fed9e0279e842aa1f9e",
+      "sizeBytes": 2585
+    },
+    {
+      "path": "app/tests/pipeline-worker-unit.mjs",
+      "sha256": "01eb05c7cb10bf125299998b67b47751f5dbb3c1a5ed89a088b3d1605c6e08f4",
+      "sizeBytes": 11173
+    },
+    {
+      "path": "app/tests/reprocess-managed-history-unit.mjs",
+      "sha256": "c62964a670a3d9887d10fb72a0cbbe6c0bb8a73428decbde7d269ebf795b0f57",
+      "sizeBytes": 1106
+    },
+    {
+      "path": "app/tests/smoke.mjs",
+      "sha256": "aca8347af5295e976fc1398f305e1a617887dc83974d178dbc1a2c70d42f9b46",
+      "sizeBytes": 64836
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "a84ec938e156f3064e1d2743f9d780f6229b9632948ec69f5d848bdd8f41c849",
+      "sizeBytes": 492
+    },
+    {
+      "path": "D_RELEASE_MANIFEST.json",
+      "sha256": "896111d7de0b0e29599f1b82c57555d82ddfb77c5ee58ea0e65940419a66a16e",
+      "sizeBytes": 1943
+    },
+    {
+      "path": "deploy/assert-isolation.sh",
+      "sha256": "de97f3096b4d105703d2f2e16feb6d415ff38fb8700a4d006d760fbd249cf3ee",
+      "sizeBytes": 1866
+    },
+    {
+      "path": "deploy/CIRCUIT_RECOVERY.md",
+      "sha256": "cd0e8821eabb31e3b04a4a3526a85139e6aa5b954744ce772b5b9eaa542158e9",
+      "sizeBytes": 3090
+    },
+    {
+      "path": "deploy/compose.yaml",
+      "sha256": "3ab5162f82267ac35325dd2c112275ec98ce579d3f196464a1255b1682ad3781",
+      "sizeBytes": 1171
+    },
+    {
+      "path": "deploy/Dockerfile",
+      "sha256": "e69417f6590f47bd1d9458eea8db879dfc53335a2ccc287c98aa6ac62f45a298",
+      "sizeBytes": 459
+    },
+    {
+      "path": "deploy/healthcheck.sh",
+      "sha256": "76edf2125e10cb730355b64027d0e6ee08de181589a31726922e1fcf519d0288",
+      "sizeBytes": 7467
+    },
+    {
+      "path": "deploy/HTTPS_STATUS.md",
+      "sha256": "404d8252d97ebfb996248323c7a3b23a9b0dd371deb39e9ee112012e59ce0325",
+      "sizeBytes": 2469
+    },
+    {
+      "path": "deploy/INCIDENTS.md",
+      "sha256": "880c5700c35e3e1ce5c2c60eee4cd81647d13d1af18d7c111091b6db55de239b",
+      "sizeBytes": 1820
+    },
+    {
+      "path": "deploy/nginx-prospect-ops.conf",
+      "sha256": "f46d883336d4452560fbeaf6cf1a47db659b4624c782a7face7783ce9c130c4f",
+      "sizeBytes": 1791
+    },
+    {
+      "path": "deploy/README.md",
+      "sha256": "ca0a269aa72374c55991855e37286aae1c091a00b4b904ea593f347cc50ba16f",
+      "sizeBytes": 19078
+    },
+    {
+      "path": "deploy/release.json",
+      "sha256": "5ef449d3dfb74e3cebe1592f87128768b6dc8a825a45582ec5f47cba3f23c749",
+      "sizeBytes": 237
+    },
+    {
+      "path": "deploy/requirements-deploy.txt",
+      "sha256": "bc6756c75e893fffbad6b668838cea93520dd848336465894a3293a9054ca524",
+      "sizeBytes": 17
+    },
+    {
+      "path": "deploy/source/source.json",
+      "sha256": "ab8b40ec4b888c1488fe98f670b81e8cc45aad8ce69b52115aa872c56386c62c",
+      "sizeBytes": 465715
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/all-file-hashes.tsv",
+      "sha256": "f98cbd91105909b78e258a441eb8cdf6c15e7ceef931ea124ff14dacad770e7a",
+      "sizeBytes": 1426398
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/D_DRIVE_RECOVERY_INDEX.md",
+      "sha256": "ad44cca4763cf8ac4318408f70d650b6da810519131b1e3f30c4422e717e068b",
+      "sizeBytes": 1720
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/PHASE12_6_C_SERVER_HUNK_REVIEW.md",
+      "sha256": "47b726f3387d4c646a84db608fa1a06aef028a1df7b1df420541fca3f3f3739f",
+      "sizeBytes": 1682
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/protected-assets.tsv",
+      "sha256": "5ce5d227ad92ee13ea1fd49477de23b43e6704003975a31ce68989115a760959",
+      "sizeBytes": 1241210
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/README.md",
+      "sha256": "dc5dfc408ea22ae198b8adb1ecde423721347205acdf03d018e21907532c83f7",
+      "sizeBytes": 200
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/RELEASE_JSON_MERGE_REVIEW.md",
+      "sha256": "a2d52ee146985d590785a2ed702f5e0ce6fbe6e366653ff6e61cdd8ad1ace899",
+      "sizeBytes": 678
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/SERVER_HUNK_APPROVAL_PLAN.md",
+      "sha256": "a091db3907052d121437ed84802493732b097cabb912c3498cdf32a1f3b648ca",
+      "sizeBytes": 1513
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/SERVER_MERGE_PREPARATION.md",
+      "sha256": "5c5fa2a7cc6a1c577c8bb5fbdf6f9de4c13a55e5ac65eca299797021b1cf9b29",
+      "sizeBytes": 810
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/SERVER_MERGE_REVIEW.md",
+      "sha256": "f929a171c060764976497aec0d857006a15471a155c7a71b431356e966637e72",
+      "sizeBytes": 869
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/SERVER_THREE_WAY_DIFF_MAP.md",
+      "sha256": "1606e6261717fafe1017c47da6a7d71fb9b25d178d4dcb08e55d59264c28adbd",
+      "sizeBytes": 2137
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/server-three-way-candidate.patch",
+      "sha256": "85cd4dc75cb93cc73d706e55a7b7770ac9c492889a927f2831cfff385200c6fe",
+      "sizeBytes": 5691
+    },
+    {
+      "path": "docs/engineering-history/migration-archive/sync-manifest.tsv",
+      "sha256": "c7ed163c1a3152780ceb7672893e9d1f3bf544c5215235043d38edd581ee19da",
+      "sizeBytes": 2831
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/FINAL_C_D_SOURCE_DIFFERENCE_AUDIT.md",
+      "sha256": "42f16d1c99a0ea407b3fabd3085af713cebb5e6ced86c08e8e2c80a3c097a3fe",
+      "sizeBytes": 889
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/FINAL_CONTROL_PLANE_LIVE_READONLY_REPORT.md",
+      "sha256": "78a7e349902eded79749ca41dd2c616768dad2500d4f4fcf6ce0da1c112aae4f",
+      "sizeBytes": 746
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/FINAL_CONTROL_PLANE_LIVE_VERIFICATION_V2.md",
+      "sha256": "b422d8486d36d84effbd978d896fba2d847c613d630ae9b80f701d19d5355197",
+      "sizeBytes": 777
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/FINAL_CONTROL_PLANE_READONLY_VERIFICATION.md",
+      "sha256": "edfecbbe1014d2c7154e07e6cfcddf2fbbb079b5a0e55f3274aef84877dcf711",
+      "sizeBytes": 843
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/FINAL_FUNCTIONAL_PARITY_AUDIT.md",
+      "sha256": "965e277d018abdaec8bb6a37bb494d77add7ca0e8bf074f495cec6874de37a20",
+      "sizeBytes": 1542
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/FINAL_SERVER_HUNK_APPROVAL.md",
+      "sha256": "b4b87f344aaa5e34553ce8a016b18fed5bf3a410b6bbc75d5e0e1c0c4a343731",
+      "sizeBytes": 645
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/FINAL_SERVER_INTEGRATION_DECISION.md",
+      "sha256": "7f0ad295f3cf044f2a0a892d992a3ca3f48540993bae9532fe70ca2b14d35f84",
+      "sizeBytes": 548
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/FULL_FUNCTIONAL_PARITY_MATRIX.md",
+      "sha256": "337a2d5a8900ac0c3e96ca821268e11bd8d455deb92435a8e283508747f61757",
+      "sizeBytes": 1297
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/FUNCTION_RESTORATION_MATRIX.md",
+      "sha256": "7cf14534ef3fb4c2b9ce318a4b1fe0139a563062d20cbfdbd5df366c0ed1e22b",
+      "sizeBytes": 1807
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/NETEASE_TEST_CONTRACT_REVIEW.md",
+      "sha256": "81454486bd33ea2caf68d54bb33222c6a18cd9cd4725d2a094d556e1bcc9e71e",
+      "sizeBytes": 588
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_3_B_PRODUCTION_EVENT_INTEGRATION.md",
+      "sha256": "be43aa606c5737d387b2ee157e9db53814460c7a397ae4df7e57012bd303d669",
+      "sizeBytes": 8837
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_3_C_PRODUCTION_RELEASE_VERIFICATION.md",
+      "sha256": "3981f5bdd6ced77be1f88e101a48e9fe8fbf9d5ad17f4c92e24071cfd82cdea0",
+      "sizeBytes": 4787
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_3_D_PRODUCTION_RELEASE_ENABLEMENT.md",
+      "sha256": "90008b908c8c2dfac19e56e5608d6441bb2416353a8037cc6d24a1e866cd4ce7",
+      "sizeBytes": 3991
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_3_E_RELEASE_ARTIFACT_ALIGNMENT.md",
+      "sha256": "2c6d6e2ee5cc60084bd2264b8e0fe91c479d465916dfe200551a47eb94065dac",
+      "sizeBytes": 4903
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_3_G_DEVELOPMENT_WORKSPACE_CONSOLIDATION.md",
+      "sha256": "41d83cae06086ed1066a02068725298d50f73ff976df6c032c0e5fff0901b580",
+      "sizeBytes": 9055
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_3_H_SOURCE_SYNCHRONIZATION_PLAN.md",
+      "sha256": "da1f8888345ecc6c103b3d95d9087da2987aec2e1807afcf7e8764834bce118b",
+      "sizeBytes": 8990
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_3_I_CONTROLLED_SYNCHRONIZATION_EXECUTION.md",
+      "sha256": "3b3ad2e7222e8f566b6aa9fff0c0bf6a9eaf504a676cc21ad41040b66a572600",
+      "sizeBytes": 3956
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_B_CONTROLLED_CD_MERGE.md",
+      "sha256": "f3c12f3a59ba747787f1aef9c39d54d3da1c2cc9c8add74f3deb9e27ad0a6cc6",
+      "sizeBytes": 1634
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_C_SERVER_HUNK_REVIEW.md",
+      "sha256": "caa0a3f092d57198a26bc22b8adc6e34ae1553163367054cbc657c11b59685ce",
+      "sizeBytes": 427
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_D_SERVER_CAPABILITY_EXTRACTION.md",
+      "sha256": "d047b291ae1bf9449f7af616d13b6adf808771810b49e38bcd800797cfe89c11",
+      "sizeBytes": 1684
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_E_FUNCTIONAL_RESTORATION_PLAN.md",
+      "sha256": "34ba6ea3aa3e1b73da5132e9c12072e65beb4c4c26b9aeb22d34034f90d060cb",
+      "sizeBytes": 1928
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_F_FUNCTIONAL_WIRING_RESTORATION.md",
+      "sha256": "1f9292db77032d6aa2933a50251ac68a88a370be76105a6c2d3147925902f485",
+      "sizeBytes": 1491
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_G_APPROVAL_ADAPTER_IMPLEMENTATION.md",
+      "sha256": "9b05363c8a7827fcff102f1e16578783121277d3ea74bd1548b761566856509d",
+      "sizeBytes": 1245
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_H_FUNCTIONAL_PARITY_RESTORATION.md",
+      "sha256": "5b78cb38700c90984179a042c94fa61ef79140161d9fbeddd60f707f389bf332",
+      "sizeBytes": 1093
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_I_D_SOURCE_FINALIZATION.md",
+      "sha256": "9721a83d6bedc84f9243995ecbfa9f073556fafc3ab8572791fd8ea9b28fefab",
+      "sizeBytes": 1038
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_J_D_UNIQUE_SOURCE_FREEZE_DECISION.md",
+      "sha256": "5f223f0fc8da722315c3696c47df5fc462bdde662acf1131b8bc0c344468531f",
+      "sizeBytes": 891
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_K_DEPENDENCY_AND_LIVE_VERIFICATION.md",
+      "sha256": "157502aafa79d66669865c880938e272ab21379d8083665b136cd43167eded24",
+      "sizeBytes": 1264
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_N_UNIQUE_SOURCE_FREEZE_DECISION.md",
+      "sha256": "322f68737296835911f3556bf03af8236b01457c5c0cc24f5e0eb782460911c8",
+      "sizeBytes": 1118
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PHASE12_6_O_RELEASE_RECONSTRUCTION.md",
+      "sha256": "d5593b7325b85f016ec46bc2027e703592d1908dfb2cf18c330a95c8a305c47e",
+      "sizeBytes": 1106
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PRODUCTION_BASELINE.md",
+      "sha256": "8db25d11a204d0f351f36c30d7e2509b65861d6c6d14543b1bb2a2db31167d90",
+      "sizeBytes": 1142
+    },
+    {
+      "path": "docs/engineering-history/phase-reports/PROJECT_HANDOVER_20260904.md",
+      "sha256": "580be11459ce4b6c43230b92002075e5d1313418646c9577e70b77106eec441b",
+      "sizeBytes": 3602
+    },
+    {
+      "path": "FINAL_DEPLOYMENT_INPUT_D_ONLY.json",
+      "sha256": "3c2f5bc91712d44081648f31c056993d201431866d702df73a6d05c2f1954083",
+      "sizeBytes": 392
+    },
+    {
+      "path": "FINAL_GITHUB_PUSH_PREFLIGHT.md",
+      "sha256": "0d927a8e4a24da5911d7f01e6d4914b7b23642d21119fc1bee3319f4c3fc8dd8",
+      "sizeBytes": 1208
+    },
+    {
+      "path": "PHASE12_6_S_PUBLIC_RELEASE_SANITIZATION.md",
+      "sha256": "75ba6dd6c1e571008f5a1b51a9e31b1f058cb4999e29b51800414e131f636030",
+      "sizeBytes": 1414
+    },
+    {
+      "path": "PHASE12_6_T_PUBLIC_RELEASE_FINAL_REVIEW.md",
+      "sha256": "ffce1301c5927f64630986eac055eed43a76738079a856156d3e4fd105ca3965",
+      "sizeBytes": 1730
+    },
+    {
+      "path": "plans/managed-hscode-plan.json",
+      "sha256": "2a6a77694717736474b62adbf6b994fa3806b273b3efef76ca4b9b85c9b2499b",
+      "sizeBytes": 1814
+    },
+    {
+      "path": "PROJECT_STRUCTURE.md",
+      "sha256": "b30631f32d9cd454364734ddb44d7b3308a59156879be34c67d864dbc1feafc3",
+      "sizeBytes": 644
+    },
+    {
+      "path": "PUBLIC_DEPLOYMENT_EXPOSURE_REVIEW.md",
+      "sha256": "fc4ac68ac96fdc0859ffd0f0a622cf4f015480d509a15978e1662dfd4c94a9e9",
+      "sizeBytes": 1143
+    },
+    {
+      "path": "PUBLIC_DEPLOYMENT_FINAL_POLICY.md",
+      "sha256": "7edb3407320550e073d28789edbe950c2e1e232b0b3621785ecb41de2f5d72d8",
+      "sizeBytes": 1271
+    },
+    {
+      "path": "PUBLIC_EXPORT_SECURITY_AUDIT.md",
+      "sha256": "ee4b486123228d32fab336fef8d519a7c639f50002e4897bf1cf7ea0a04ff61c",
+      "sizeBytes": 1592
+    },
+    {
+      "path": "PUBLIC_REPOSITORY_STRUCTURE_REVIEW.md",
+      "sha256": "dd3062022aa70cc8005b6bbff4001c9645b24671505abd93eb0fa9a027c8d3ea",
+      "sizeBytes": 867
+    },
+    {
+      "path": "README_PROJECT_STATUS.md",
+      "sha256": "6a6ae4d7a831fb31742d78407df452d787ec2eed80e24835fe28e5302e9201be",
+      "sizeBytes": 703
+    },
+    {
+      "path": "README.md",
+      "sha256": "b7219e8a905b790d1d135e8e2fbccfb193357a32c8b06c7d5af44e4c1e12ea9e",
+      "sizeBytes": 1834
+    },
+    {
+      "path": "SOURCE_OF_TRUTH.md",
+      "sha256": "e8db95258e4dbc7119bf547ca7a8b5225ee16f09062175a527d93f2322ae773f",
+      "sizeBytes": 486
+    },
+    {
+      "path": "TOKEN_REVIEW_REPORT.md",
+      "sha256": "06cfe16689dd54e0c81d4dd743301924d15ae863c4a03ff546c0e08888fc738c",
+      "sizeBytes": 691
+    },
+    {
+      "path": "tools/browser-control-foundation.mjs",
+      "sha256": "46b4de990c82b5a8e1e6535d3c8cdeb3558e6cc90d1033fefc169623a3f4a401",
+      "sizeBytes": 3659
+    },
+    {
+      "path": "tools/browser-health-check.mjs",
+      "sha256": "18dca977aa40d51d9be3e027572d87cd69399566afe17a2f4dd9a8508346b2a1",
+      "sizeBytes": 4890
+    },
+    {
+      "path": "tools/handoff-managed-pipeline.py",
+      "sha256": "80f855bea8671e028cfe1b01998c26cb925b24cc6dbb609a5b3b8a4dbcb3e1a0",
+      "sizeBytes": 18799
+    },
+    {
+      "path": "tools/imap-feedback-poller.py",
+      "sha256": "8533dd96733312d4c632f7a1a95d9aa3c1c0e56b2fc052ca6c87e4be09198bb4",
+      "sizeBytes": 15993
+    },
+    {
+      "path": "tools/install-managed-hscode-task.ps1",
+      "sha256": "841ae7fb20c93c1a01c101abac88745c4bdfc3a0c0732e3f1e3e438d06d122c5",
+      "sizeBytes": 1179
+    },
+    {
+      "path": "tools/managed-hscode-plan.mjs",
+      "sha256": "f7c8d6a1ecaa90e6f4ecb5a24ef0e8454d3fa0d3bdd6e292f03cb3ef7c7e68ff",
+      "sizeBytes": 14281
+    },
+    {
+      "path": "tools/monitor-production-capacity.mjs",
+      "sha256": "f02769f223e86491f59ba9331295965d46862593d1729a59f7678e978fbbc015",
+      "sizeBytes": 10372
+    },
+    {
+      "path": "tools/NETEASE_EDGE_CDP.md",
+      "sha256": "c04a7c0387039e1f3cd32f2fdbefc14675da933be51d7a80ce2a0c7ba87d198a",
+      "sizeBytes": 11976
+    },
+    {
+      "path": "tools/netease-cdp-client.mjs",
+      "sha256": "b0083e4b974207a20951eca49a94f77543b72759d278163000e915ec78587f3d",
+      "sizeBytes": 71965
+    },
+    {
+      "path": "tools/netease-contact-supervisor.mjs",
+      "sha256": "22138c381ee93c5fa9e9dc442885d224fd9315ffa5eda74d05b18ccb704251f1",
+      "sizeBytes": 13461
+    },
+    {
+      "path": "tools/netease-country-business-discovery.mjs",
+      "sha256": "4f9c469b92724b03ebdb1ca7f40d672f492321d74e6542b2fd805e7c7a4a20eb",
+      "sizeBytes": 11326
+    },
+    {
+      "path": "tools/netease-hscode-discovery.mjs",
+      "sha256": "4fb4da40b19558bf45ae909a95e8b9fdd5b8a6f6197557ecaa5c764fdffa9bc8",
+      "sizeBytes": 7649
+    },
+    {
+      "path": "tools/netease-keyword-discovery.mjs",
+      "sha256": "3905886fa6686828190657dcaefc05a3b2534426e08cddfd839d87f11de8e174",
+      "sizeBytes": 5448
+    },
+    {
+      "path": "tools/netease-login-recovery.mjs",
+      "sha256": "fa4852bf9ec1d9728d26058e635616399241ea256513ceceb654cb1357523f98",
+      "sizeBytes": 4980
+    },
+    {
+      "path": "tools/netease-playwright-search.mjs",
+      "sha256": "d176880a3f81dea75e35588a6226b0a2874b4ffb5125addf1194c79a902e67a5",
+      "sizeBytes": 9166
+    },
+    {
+      "path": "tools/reprocess-managed-history.mjs",
+      "sha256": "187c2e81a29db4b2ce8b7e5dd38bae795c6abc1f3ddc04ec9c8ddaa2007ea251",
+      "sizeBytes": 13117
+    },
+    {
+      "path": "tools/run-auto-delivery-consumer.mjs",
+      "sha256": "9a2bd3971d5be0254cc8e2eacd894111a807bc3ed7de476e350bb94d4af1ad70",
+      "sizeBytes": 454
+    },
+    {
+      "path": "tools/run-managed-country-business-collection.mjs",
+      "sha256": "99f306be563a24a649a5bf4b698be6cfb6dd07d89db4a6bd87e428ca3c359f51",
+      "sizeBytes": 14227
+    },
+    {
+      "path": "tools/run-managed-hscode-plan.mjs",
+      "sha256": "ebf340b96b8e1e97fb334a7928ad9a13e2a795e72e4dfa0738038930ef7b282d",
+      "sizeBytes": 28349
+    },
+    {
+      "path": "tools/run-managed-hscode-plan.ps1",
+      "sha256": "ace460d6639586e54875a90760b25e4c5a77c332c8962e2fe150db9b6de4e5f3",
+      "sizeBytes": 2985
+    },
+    {
+      "path": "tools/run-managed-preflight.py",
+      "sha256": "be7f002c70a11bf8ab510e75424901bf3d75c0734119590f963d4c2d97817f0e",
+      "sizeBytes": 5669
+    },
+    {
+      "path": "tools/send-gate-migration-canary.mjs",
+      "sha256": "5c429a72f0a96a38a77abc8f53a628b94407c16b262d2625f760b6bf43930f88",
+      "sizeBytes": 4483
+    },
+    {
+      "path": "tools/server-netease-login.py",
+      "sha256": "52e87858d19d691b508d29c6b02777d593782d69c5dec5d355d4f57ec60b45b2",
+      "sizeBytes": 2218
+    },
+    {
+      "path": "tools/server-netease-screenshot.py",
+      "sha256": "979c8da150aa921877f9b1e16c8e9888575fcef064ee0f154153ec9e65c7089b",
+      "sizeBytes": 2663
+    },
+    {
+      "path": "tools/simulate-contact-pool.mjs",
+      "sha256": "a81829d81be95f5962ececa665204aea186d2a15dcd2fe7b0a1439047dc12d3e",
+      "sizeBytes": 1512
+    },
+    {
+      "path": "tools/sync-managed-plan.py",
+      "sha256": "9589a2d089a9adefacd669574221602dbeabfc04f909064213c4f61b7ef63e71",
+      "sizeBytes": 3785
+    },
+    {
+      "path": "tools/verify-contacts.py",
+      "sha256": "2d74ff7f15ef4b1b872a9b76623d5e2b561b4647747d562c823ed9bb2bcec726",
+      "sizeBytes": 4292
+    }
+  ],
+  "excluded": {
+    "patterns": [
+      ".env*",
+      "credentials",
+      "password/account/secret/token",
+      "ssh",
+      "browser profile",
+      ".codex_work",
+      "runtime",
+      "outputs",
+      "mailbox",
+      "queue",
+      "outbox",
+      "backup",
+      "recovery",
+      "identity-source",
+      "temporary builds and caches",
+      "deployment executors and systemd units"
+    ],
+    "rationale": "Public export is allowlist-only; excluded files remain in D or export quarantine and were not deleted."
+  }
+}

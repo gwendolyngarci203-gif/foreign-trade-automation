@@ -1,0 +1,32 @@
+# Production runtime and mutable data
+deploy/runtime-data/
+app/data/
+outputs/
+tmp/
+.codex_work/
+browser-runtime/
+*.log
+*.log.*
+.env
+.env.*
+!.env.example
+deploy/.env.runtime
+# Secrets and mailbox state
+secrets/
+**/*secret*
+**/*password*
+deploy/mailbox-accounts.json
+**/outbox.json
+**/contact-collection.json
+**/sender-accounts.json
+**/mailboxes.json
+**/mailbox-replies.json
+# Local artifacts
+*.upload-*
+__pycache__/
+*.pyc
+
+.codex_work/
+deploy/backups/
+*.tar.gz
+*.bundle

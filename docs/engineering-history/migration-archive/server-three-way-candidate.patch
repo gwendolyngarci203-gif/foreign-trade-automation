@@ -1,0 +1,117 @@
+diff --git "a/D:\\zcy\\release-phase12-clean-staging\\app\\server.mjs" "b/D:\\zcy\\\345\244\226\350\264\270\350\207\252\345\212\250\345\214\226\346\213\223\345\256\242\347\263\273\347\273\237\\app\\server.mjs"
+index 3799f79..ec88169 100644
+--- "a/D:\\zcy\\release-phase12-clean-staging\\app\\server.mjs"
++++ "b/D:\\zcy\\\345\244\226\350\264\270\350\207\252\345\212\250\345\214\226\346\213\223\345\256\242\347\263\273\347\273\237\\app\\server.mjs"
+@@ -30,13 +30,6 @@ import {
+   validateBusinessKeywords,
+ } from "./keyword-collection.mjs";
+ import { resolveCompanyProcessingStrategy } from "./company-processing-strategy.mjs";
+-import {
+-  buildClassifiedMetrics,
+-  createEventEnvelope,
+-  inheritEventEnvelope,
+-  reconcileMetrics,
+-  OBSERVABILITY_SCHEMA_VERSION,
+-} from "./observability.mjs";
+
+ const appDir = path.dirname(fileURLToPath(import.meta.url));
+ const workspaceDir = path.resolve(appDir, "..");
+@@ -1053,10 +1046,6 @@ async function recordFeedbackEvent(input, source) {
+     recordedAt,
+     outboxId: outboxEntry?.id || "",
+     campaignId: outboxEntry?.campaignId || "",
+-    observability: inheritEventEnvelope(outboxEntry || {}, {
+-      origin: "feedback_event",
+-      createdAt: recordedAt,
+-    }),
+   };
+   runtimeStateStore.feedback.events = [...runtimeStateStore.feedback.events, event].slice(-5000);
+   runtimeStateStore.feedback.lastEventAt = recordedAt;
+@@ -1720,18 +1709,9 @@ function pipelineJobPublicView(job) {
+
+ function createPipelineJob(task, input = {}) {
+   const now = new Date().toISOString();
+-  const id = `pipe_${crypto.randomUUID()}`;
+   const inputReference = String(input.inputReference || "").trim().slice(0, 500);
+   return {
+-    id,
+-    observability: createEventEnvelope({
+-      classification: input.classification || "production",
+-      origin: "pipeline_job",
+-      runType: input.runType || "production",
+-      createdBy: "pipeline",
+-      traceId: `trace_${id}`,
+-      createdAt: now,
+-    }),
++    id: `pipe_${crypto.randomUUID()}`,
+     operationTaskId: task?.id || null,
+     hsCode: String(input.hsCode || task?.hsCode || ""),
+     collectionMode: input.collectionMode || task?.collectionMode || "hscode",
+@@ -1785,43 +1765,6 @@ function pipelineSummary() {
+   };
+ }
+
+-function observabilitySnapshot() {
+-  const businessDate = currentBusinessDate();
+-  const jobs = pipelineStore.jobs || [];
+-  const entries = outboxStore.entries || [];
+-  const rawMetrics = {
+-    draftsGenerated: jobs.reduce((total, job) => total + (job.artifacts || [])
+-      .filter((artifact) => artifact.stage === "drafting" && businessDateFor(new Date(artifact.at)) === businessDate)
+-      .reduce((count, artifact) => count + Number(artifact.counts?.draftedContacts || 0), 0), 0),
+-    autoApproved: jobs.reduce((total, job) => total + (job.audit || [])
+-      .filter((event) => event.type === "pipeline_auto_approved" && businessDateFor(new Date(event.at)) === businessDate)
+-      .reduce((count, event) => count + Math.max(1, Number(event.draftIndexes?.length || 0)), 0), 0),
+-    outboxCreated: entries.filter((entry) => businessDateFor(new Date(entry.createdAt)) === businessDate).length,
+-    accepted: entries.filter((entry) => entry.status === "accepted" && businessDateFor(new Date(entry.updatedAt || entry.createdAt)) === businessDate).length,
+-    failed: entries.filter((entry) => entry.status === "failed" && businessDateFor(new Date(entry.updatedAt || entry.createdAt)) === businessDate).length,
+-    retries: entries.reduce((total, entry) => total + (entry.events || [])
+-      .filter((event) => /retry|requeued/.test(String(event.type || "")) && businessDateFor(new Date(event.at)) === businessDate).length, 0),
+-  };
+-  const classifiedMetrics = buildClassifiedMetrics({
+-    jobs,
+-    outboxEntries: entries,
+-    feedbackEvents: runtimeStateStore.feedback.events || [],
+-    businessDate,
+-    businessDateFor,
+-  });
+-  return {
+-    schemaVersion: OBSERVABILITY_SCHEMA_VERSION,
+-    businessDate,
+-    rawMetrics,
+-    classifiedMetrics,
+-    legacyClassificationView: classifiedMetrics.legacyClassificationView,
+-    reconciliation: reconcileMetrics(rawMetrics, classifiedMetrics, {
+-      total: classifiedMetrics.mappingCount,
+-    }),
+-    readOnly: true,
+-  };
+-}
+-
+ function claimNextPipelineJob(owner, leaseSeconds) {
+   const nowMs = Date.now();
+   const expired = (pipelineStore.jobs || []).filter((job) => (
+@@ -1865,12 +1808,7 @@ function updatePipelineStage(job, input) {
+   const now = new Date().toISOString();
+   const artifact = sanitizePipelineArtifact(input.artifact);
+   if (artifact && (artifact.reference || artifact.note || Object.keys(artifact.counts).length)) {
+-    job.artifacts = [...(job.artifacts || []), {
+-      stage,
+-      at: now,
+-      ...artifact,
+-      observability: inheritEventEnvelope(job, { origin: "pipeline_artifact", createdAt: now }),
+-    }].slice(-500);
++    job.artifacts = [...(job.artifacts || []), { stage, at: now, ...artifact }].slice(-500);
+   }
+   job.stages[stage] = { ...(job.stages[stage] || {}), status: outcome, updatedAt: now };
+   job.leaseOwner = "";
+@@ -4024,9 +3962,6 @@ async function apiHandlerUnlocked(req, res, url, model) {
+   if (req.method === "GET" && pathname === "/api/pipeline") {
+     return json(res, 200, pipelineSummary());
+   }
+-  if (req.method === "GET" && pathname === "/api/observability") {
+-    return json(res, 200, observabilitySnapshot());
+-  }
+   if (req.method === "GET" && pathname === "/api/country-business-collection/status") {
+     return json(res, 200, await countryBusinessCollectionStatus());
+   }

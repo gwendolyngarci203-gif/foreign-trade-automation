@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "releaseCommit": "0316b9fd96017924c3de046f2def3fabde94fff2",
+  "manifestSha256": "896111d7de0b0e29599f1b82c57555d82ddfb77c5ee58ea0e65940419a66a16e",
+  "rollbackTarget": "3e1c5db12dc484c1de5fd62be173d10defb28c51",
+  "planDigest": "896111d7de0b0e29599f1b82c57555d82ddfb77c5ee58ea0e65940419a66a16e",
+  "mode": "dry-run-only",
+  "transport": "not configured"
+}

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "source": "D-only",
+  "sourceCommit": "0316b9fd96017924c3de046f2def3fabde94fff2",
+  "rollbackTarget": "3e1c5db12dc484c1de5fd62be173d10defb28c51",
+  "includedFiles": [
+    {
+      "path": "app/server.mjs",
+      "sha256": "87fadbb175e0e4a7c87d70557a624571d27b915b8b32edaabc96215fdfdfc3e9"
+    },
+    {
+      "path": "app/observability.mjs",
+      "sha256": "0c5b7939a46ff73c5e502cc5ffe2d86e0e80ac05163d19e5f9b1daf42eeda4b6"
+    },
+    {
+      "path": "app/auto-approval.mjs",
+      "sha256": "67f01de3d62d96f6fc9602847051ca72044e0c6f2a48eceeef79831a98940498"
+    },
+    {
+      "path": "app/services/approval-adapter.mjs",
+      "sha256": "00fb8e0327d304c0e6da4bc8b64fe77c7a6abc9e9fcd373bc667de9eade077db"
+    },
+    {
+      "path": "app/tests/approval-adapter-unit.mjs",
+      "sha256": "9150d1de92ffc48c639a7b24b96a8d5c770e1f20c4dc445b53b2e908a651e90b"
+    },
+    {
+      "path": "app/tests/approval-adapter-integration-unit.mjs",
+      "sha256": "eb99830d2c5f8a6a2c9539839894db8fe06dd87751aecdf76d3040e148387459"
+    },
+    {
+      "path": "app/tests/fixtures/d-only-source.json",
+      "sha256": "86040c5e8ed02b624d95c44c1be5ddf0585f558b36b31922b0dde800ee3d5410"
+    },
+    {
+      "path": "app/data/email-template-library.json",
+      "sha256": "cc4e04263a3e1e0a6a26afbe07c71e4d8831fa3500e569144fe653973ccfb094"
+    },
+    {
+      "path": "app/data/managed-history-report.json",
+      "sha256": "35f450fc695acd21d0f02aecf56e2e163eca00123ddb6413266f63865fbe56e9"
+    },
+    {
+      "path": "deploy/release.json",
+      "sha256": "7c8c722c5bb856baa5bb9814e4d5abe3eecdb11876be4f1228908077b93c1c7c"
+    }
+  ],
+  "excluded": [
+    ".env",
+    "credentials",
+    "runtime",
+    "queue",
+    "pipeline",
+    "outbox",
+    "browser profile",
+    "SMTP"
+  ],
+  "protected": [
+    "deploy/.env.*",
+    "runtime stores",
+    "SSH",
+    "browser profile"
+  ]
+}

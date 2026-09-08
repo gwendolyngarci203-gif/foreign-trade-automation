@@ -1,0 +1,24 @@
+{
+  "source": "d-only-test-fixture",
+  "retrieval_date": "2099-01-01",
+  "supplier_query": "Fixture Supplier",
+  "supplier_summary": { "trade_count": 1, "amount_usd": 100, "last_trade_date": "2099-01-01" },
+  "raw_buyer_count": 1,
+  "raw_buyer_amount_sum_usd": 100,
+  "reconciliation_difference_usd": 0,
+  "all_buyers": [
+    { "buyer": "Fixture Buyer", "country": "Test", "amount_usd": 100, "share_pct": 100, "last_trade_date": "2099-01-01", "trade_count": 1 }
+  ],
+  "top20_company_and_contacts": [
+    {
+      "query_name": "Fixture Buyer",
+      "trade": { "country": "Test", "amount_usd": 100, "share_pct": 100, "last_trade_date": "2099-01-01", "trade_count": 1 },
+      "chosen": { "display_name": "Fixture Buyer", "website": "https://example.invalid", "contact_count": 0 },
+      "meta": { "matched_company": "Fixture Buyer", "website": "https://example.invalid", "contact_count": 0 },
+      "match_confidence": "fixture",
+      "match_note": "D-only isolated fixture; no real contact data.",
+      "accessible_contact_rows": 0,
+      "contacts": []
+    }
+  ]
+}
