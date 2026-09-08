@@ -21,4 +21,4 @@ The intended clean clone verification was attempted after the push but could not
 
 ## Reconciled state
 
-The initial manifest was superseded after the ignored files were identified. The current public candidate manifest is generated from 145 Git-tracked payload files. Its SHA256 is recorded in `PUBLIC_GITHUB_FILE_MANIFEST.json`. The reconciliation commit is local and awaits a normal push because the host could not connect to `github.com:443`; it has not been represented as remote-complete.
+The initial manifest was superseded after the ignored files were identified. The current public candidate manifest is generated from 145 Git-tracked payload files. Its SHA256 is `bccd80b81fc484689a27ab42234c8692ac6030536d56d7b6015d29aeb9a70d3e`. The reconciliation commit `3a6bbc941b1ffe670fcc3672fcc8f2caeef51dd4` was accepted by GitHub via a normal fast-forward push.
