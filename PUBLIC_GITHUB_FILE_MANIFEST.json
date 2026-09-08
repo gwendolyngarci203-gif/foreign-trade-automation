@@ -526,13 +526,13 @@
     },
     {
       "path": "FINAL_GITHUB_PUSH_PREFLIGHT.md",
-      "sha256": "0d927a8e4a24da5911d7f01e6d4914b7b23642d21119fc1bee3319f4c3fc8dd8",
-      "sizeBytes": 1208
+      "sha256": "e19af1c178b7ad71825e605ed90be58c2fa4471db39509a9b4c0ebb65dd4b87f",
+      "sizeBytes": 1523
     },
     {
       "path": "GITHUB_PUBLIC_SYNC_VERIFICATION.md",
-      "sha256": "00c487bcc3ed05271c0ca776bd5dfd867170224362425d9839f58351bcd90544",
-      "sizeBytes": 1269
+      "sha256": "d4f3a93efe33c863f8bf7671de274fe521a98c6262cb50aa94621fd044d5d2c5",
+      "sizeBytes": 1681
     },
     {
       "path": "PHASE12_6_S_PUBLIC_RELEASE_SANITIZATION.md",

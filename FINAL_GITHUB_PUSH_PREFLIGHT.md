@@ -31,3 +31,7 @@
 ## Authorization boundary
 
 Only a normal push of the new release branch is authorized. `main` and `production/main` will not be modified, no force push is allowed, and a remote rejection or unexpected branch collision is a stop condition.
+
+## Superseded Manifest
+
+The preflight value above is historical evidence. An initial post-push reconciliation found 41 ignored runtime/data/log files that had never entered Git. The public candidate now uses a tracked-file manifest; see `GITHUB_PUBLIC_SYNC_VERIFICATION.md` and `PUBLIC_GITHUB_FILE_MANIFEST.json`.

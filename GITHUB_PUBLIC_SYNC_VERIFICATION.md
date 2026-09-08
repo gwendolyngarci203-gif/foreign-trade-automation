@@ -18,3 +18,7 @@ The intended clean clone verification was attempted after the push but could not
 ## Verification boundary
 
 `main` and `production/main` were not modified. No deployment, SSH, SMTP, queue, outbox, runtime, service, or systemd action occurred.
+
+## Reconciled state
+
+The initial manifest was superseded after the ignored files were identified. The current public candidate manifest is generated from 145 Git-tracked payload files. Its SHA256 is recorded in `PUBLIC_GITHUB_FILE_MANIFEST.json`. The reconciliation commit is local and awaits a normal push because the host could not connect to `github.com:443`; it has not been represented as remote-complete.
