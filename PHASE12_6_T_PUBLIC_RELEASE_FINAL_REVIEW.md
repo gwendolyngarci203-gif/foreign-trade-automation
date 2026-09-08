@@ -27,7 +27,7 @@ Credentials, `.env*`, account/password files, SSH, browser profiles, runtime sto
 - Manifest/hash verification: PASS.
 - Node syntax: PASS.
 - Deployment exposure policy: PASS with explicit non-execution warnings for retained category-B definitions.
-- Public payload: 184 files; manifest SHA256 is recorded in `PUBLIC_GITHUB_FILE_MANIFEST.json`.
+- The final public manifest is regenerated from the Git tracked set after export reconciliation.
 
 ## Gate
 
