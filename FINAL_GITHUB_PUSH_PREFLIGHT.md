@@ -4,24 +4,25 @@
 
 - Remote URL: `https://github.com/gwendolyngarci203-gif/foreign-trade-automation.git`
 - Planned branch: `release/phase12-6-public-v1`
-- Remote main ref observed: `b2d5b0e5ee8fc212ca4599a915cac8c454b0e4c7`
-- Remote production ref observed: `95713bc5f9f55f780ed07081a21ce16a2ad71f17`
+- Last observed remote release ref: `3a6bbc941b1ffe670fcc3672fcc8f2caeef51dd4`
+- Remote main and production refs were not modified.
 
 ## Candidate
 
 - Source of truth: `D:\zcy\外贸自动化拓客系统`
 - Public mirror: `D:\zcy\github-public-release`
-- D source commit: `e61fe70de3566a6a586a272f110ff3f1f70c9e87`
+- D source commit used for export: `e61fe70de3566a6a586a272f110ff3f1f70c9e87`
+- Public candidate HEAD: `e1c54e0e83bbb09a330c3d0763c045b7a640917b`
 - Public payload manifest: `PUBLIC_GITHUB_FILE_MANIFEST.json`
-- Preflight manifest SHA256: `b059d98239a03aa948381ecd9bdafa2f4a171bc608b0d99aff405ad3228350f8`
+- Manifest SHA256: `bccd80b81fc484689a27ab42234c8692ac6030536d56d7b6015d29aeb9a70d3e`
 
 ## Checks
 
 | Check | Result |
 |---|---|
 | Target remote URL readback | PASS |
-| Planned release branch absent remotely | PASS |
-| Payload manifest (184 files) | PASS |
+| Release branch readback | PASS (`3a6bbc9...`) |
+| Payload manifest (145 payload files) | PASS |
 | Path denylist | PASS |
 | Secret-literal scan | PASS |
 | Large-file scan | PASS |
@@ -30,7 +31,11 @@
 
 ## Authorization boundary
 
-Only a normal push of the new release branch is authorized. `main` and `production/main` will not be modified, no force push is allowed, and a remote rejection or unexpected branch collision is a stop condition.
+Only a normal push of `release/phase12-6-public-v1` is authorized. `main` and `production/main` will not be modified, and no force push is allowed.
+
+## Transport result
+
+The candidate update at `e1c54e0...` was not delivered. Normal push attempts failed because the GitHub HTTPS connection was unavailable (port 443 timeout/reset). No fallback, retry loop, or remote mutation was performed.
 
 ## Superseded Manifest
 

@@ -4,8 +4,9 @@
 
 - Repository: `https://github.com/gwendolyngarci203-gif/foreign-trade-automation`
 - Branch: `release/phase12-6-public-v1`
-- Public commit: `609e355c2b69e0a2501a73a6c2882fbf1e2763ca`
-- Push result: GitHub accepted the new branch using a normal non-force push.
+- Last confirmed remote commit: `3a6bbc941b1ffe670fcc3672fcc8f2caeef51dd4`
+- Candidate commit pending transport: `e1c54e0e83bbb09a330c3d0763c045b7a640917b`
+- Push result: the reconciled `3a6bbc9...` commit was accepted by a normal fast-forward push; the later documentation-only candidate update was not delivered because GitHub HTTPS was unavailable.
 
 ## Local-to-commit reconciliation
 
@@ -13,7 +14,7 @@ An initial post-push audit found 41 ignored local files incorrectly listed by th
 
 ## Independent clone verification
 
-The intended clean clone verification was attempted after the push but could not connect to `github.com:443`. No retry, remote mutation, or fallback was performed. GitHub's successful push acknowledgement establishes that the named public commit was accepted; independent clone/readback remains a network-dependent follow-up.
+The remote release branch was previously independently cloned at the reconciled commit. Readback of `e1c54e0...` remains pending because normal push and subsequent GitHub HTTPS access failed with timeout/reset errors. No retry loop, remote mutation, or fallback was performed.
 
 ## Verification boundary
 
@@ -21,4 +22,4 @@ The intended clean clone verification was attempted after the push but could not
 
 ## Reconciled state
 
-The initial manifest was superseded after the ignored files were identified. The current public candidate manifest is generated from 145 Git-tracked payload files. Its SHA256 is `bccd80b81fc484689a27ab42234c8692ac6030536d56d7b6015d29aeb9a70d3e`. The reconciliation commit `3a6bbc941b1ffe670fcc3672fcc8f2caeef51dd4` was accepted by GitHub via a normal fast-forward push.
+The initial manifest was superseded after the ignored files were identified. The current public candidate manifest is generated from 145 Git-tracked payload files. Its SHA256 is `bccd80b81fc484689a27ab42234c8692ac6030536d56d7b6015d29aeb9a70d3e`. The reconciliation commit `3a6bbc941b1ffe670fcc3672fcc8f2caeef51dd4` was accepted by GitHub via a normal fast-forward push. The current manifest payload is unchanged between the confirmed remote commit and the pending candidate commit.
